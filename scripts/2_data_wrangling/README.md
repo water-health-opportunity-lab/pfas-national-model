@@ -1,0 +1,1 @@
+This folder contains scripts related to data wrangling tasks, including data cleaning, transformation, and preparation for analysis. Each script is designed to handle specific aspects of the data wrangling process, ensuring that the datasets are in optimal condition for subsequent analysis and modeling.

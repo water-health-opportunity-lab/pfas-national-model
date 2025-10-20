@@ -1,0 +1,2 @@
+This folder contains scripts related to exploratory data analysis (EDA). 
+Each script is designed to help you understand the underlying patterns, distributions, and relationships within the datasets through various visualization and statistical techniques. The goal of these scripts is to provide insights that can inform further analysis and decision-making.

@@ -1,0 +1,1 @@
+This folder contains scripts and resources related to validating the trained machine learning models using SimpleLab data.

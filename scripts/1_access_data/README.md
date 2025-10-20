@@ -1,0 +1,2 @@
+This folder contains scripts to access and download the raw data used in this project. 
+- Water Quality Portal (WQP) data can be accessed using the `get_wqp_data.R` script, which utilizes the `dataRetrieval` R package to download water quality data based on specified parameters such as site IDs, date ranges, and constituents of interest.

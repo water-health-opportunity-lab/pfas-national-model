@@ -1,0 +1,2 @@
+This folder contains scripts and resources related to training machine learning models. 
+It includes code for feature engineering, model architecture definition, training routines, and evaluation metrics.
