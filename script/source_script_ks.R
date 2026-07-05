@@ -1,9 +1,12 @@
 # ===========================================================================
 # Author: Kyndra Shea
-# Last updated: 24/6/2026
-
-# impact_pfas_site
-# dist_pfas_sites
+# Last updated: 05/7/2026
+#
+# Predictors added:
+#   impact_pfas_sites, dist_pfas_sites
+#   dist_fed_known, dist_fed_suspected, dist_discharge
+#   dist_superfund_pfas, dist_superfund_npl, dist_spills
+#   dist_part139_airports, dist_treatment_plants, dist_onsite_systems
 # ===========================================================================
 
 # Set up
@@ -19,27 +22,21 @@ library(terra)
 target_crs <- 5070  # NAD83 / CONUS Albers (meters)
 
 # ===========================================================================
-# STEP 1: Only run once ead in existing gpkg and remove deprecated individual columns
+# STEP 1: Read in existing gpkg and remove deprecated individual columns
+# Note: commented out after first run — gpkg already cleaned
 # ===========================================================================
 
 # Vuln <- st_read("/Users/kyndrashea/pfas-project/data/output/full_pfas_covars.gpkg")
 
 # Vuln <- Vuln %>%
-#   select(-starts_with("impact_fed_known"),
-#          -starts_with("impact_fed_suspected"),
-#          -starts_with("impact_discharge"),
-#          -starts_with("impact_superfund"),
-#          -starts_with("impact_spills"),
-#          -starts_with("impact_part139"),
-#          -starts_with("impact_treatment"),
-#          -starts_with("impact_onsite"),
-#          -starts_with("impact_naics_"))
+#   select(-starts_with("impact_naics_"))
+
+# st_write(Vuln, "/Users/kyndrashea/pfas-project/data/output/full_pfas_covars.gpkg",
+#          delete_dsn = TRUE)
 
 # ===========================================================================
-# STEP 2: Read in wells and build all_pfas_sources
+# STEP 2: Read in wells and build source layers
 # ===========================================================================
-
-Vuln <- st_read("/Users/kyndrashea/pfas-project/data/output/full_pfas_covars.gpkg")
 
 # Reproject for spatial operations
 Vuln_m <- st_transform(Vuln, target_crs)
@@ -55,7 +52,7 @@ read_sf_points <- function(file, lat_col = "Latitude", lon_col = "Longitude", cr
     st_as_sf(coords = c("longitude", "latitude"), crs = crs, remove = FALSE)
 }
 
-# Elevation raster — load only, do NOT reproject to save memory
+# Elevation raster — load only, do NOT reproject to save disk space
 elevation <- rast("/Users/kyndrashea/pfas-project/data/source/LF2020_Elev_CONUS/Tif/LF2020_Elev_CONUS.tif")
 elev_crs <- crs(elevation)
 
@@ -66,7 +63,7 @@ huc12 <- st_transform(huc12, target_crs)
 # Assign HUC12 to wells
 Vuln_m <- st_join(Vuln_m, huc12["huc12"])
 
-# --- Non-NAICS sources ---
+# Non-NAICS sources
 
 cwns_path <- "/Users/kyndrashea/pfas-project/data/source/CWNS Data/2022CWNS_NATIONAL_APR2024"
 cwns_tables <- list.files(cwns_path, pattern = "\\.csv$", full.names = TRUE) %>%
@@ -113,7 +110,7 @@ part139_sf <- st_read(
 federal_known     <- federal_sf %>% filter(`PFAS Presence` == "Known Detection")
 federal_suspected <- federal_sf %>% filter(`PFAS Presence` == "Suspected")
 
-# --- NAICS sources ---
+# NAICS sources
 
 frs_national <- read_csv(
   "/Users/kyndrashea/pfas-project/data/source/national_combined/NATIONAL_FACILITY_FILE.CSV",
@@ -157,7 +154,7 @@ naics_all_sf <- frs_combined %>%
   st_as_sf(coords = c("LONGITUDE83", "LATITUDE83"), crs = 4269) %>%
   st_transform(target_crs)
 
-# --- Combine all sources ---
+# --- Combine all sources for collapsed predictors ---
 
 harmonize_sf <- function(x) {
   x %>% select(geometry) %>% st_transform(target_crs)
@@ -232,7 +229,7 @@ impact_score <- function(from, to, max_dist = 5000,
 }
 
 # ===========================================================================
-# STEP 4: Compute impact_pfas_sites
+# STEP 4: Compute impact_pfas_sites (collapsed NAICS + all sources)
 # ===========================================================================
 
 cat("Computing impact_pfas_sites...\n")
@@ -243,7 +240,7 @@ print(summary(Vuln$impact_pfas_sites))
 cat("Non-zero wells:", sum(Vuln$impact_pfas_sites > 0), "\n")
 
 # ===========================================================================
-# STEP 5: Compute dist_pfas_sites (meters)
+# STEP 5: Compute dist_pfas_sites — minimum distance to any PFAS source
 # ===========================================================================
 
 cat("Finding nearest PFAS source for each well...\n")
@@ -258,6 +255,39 @@ cat("dist_pfas_sites summary (meters):\n")
 print(summary(Vuln$dist_pfas_sites))
 cat("Wells within 5km:", sum(Vuln$dist_pfas_sites <= 5000), "\n")
 cat("Wells within 1km:", sum(Vuln$dist_pfas_sites <= 1000), "\n")
+
+# ===========================================================================
+# STEP 5b: Compute per-source distance variables (meters)
+# ===========================================================================
+
+compute_dist <- function(wells_m, sources, var_name) {
+  cat("Computing", var_name, "...\n")
+  sources_m <- st_transform(sources, target_crs)
+  sources_m <- sources_m[!st_is_empty(sources_m), ]
+  nearest_idx <- st_nearest_feature(wells_m, sources_m)
+  as.numeric(st_distance(wells_m, sources_m[nearest_idx, ], by_element = TRUE))
+}
+
+Vuln[["dist_fed_known"]]        <- compute_dist(Vuln_m, federal_known,     "dist_fed_known")
+Vuln[["dist_fed_suspected"]]    <- compute_dist(Vuln_m, federal_suspected,  "dist_fed_suspected")
+Vuln[["dist_discharge"]]        <- compute_dist(Vuln_m, discharge_sf,       "dist_discharge")
+Vuln[["dist_superfund_pfas"]]   <- compute_dist(Vuln_m, superfund_pfas,     "dist_superfund_pfas")
+Vuln[["dist_superfund_npl"]]    <- compute_dist(Vuln_m, superfund_npl,      "dist_superfund_npl")
+Vuln[["dist_spills"]]           <- compute_dist(Vuln_m, spills_sf,          "dist_spills")
+Vuln[["dist_part139_airports"]] <- compute_dist(Vuln_m, part139_sf,         "dist_part139_airports")
+Vuln[["dist_treatment_plants"]] <- compute_dist(Vuln_m, treatment_sf,       "dist_treatment_plants")
+Vuln[["dist_onsite_systems"]]   <- compute_dist(Vuln_m, onsite_sf,          "dist_onsite_systems")
+
+cat("All distance variables computed.\n")
+cat("dist_fed_known summary:\n");         print(summary(Vuln$dist_fed_known))
+cat("dist_fed_suspected summary:\n");    print(summary(Vuln$dist_fed_suspected))
+cat("dist_discharge summary:\n");        print(summary(Vuln$dist_discharge))
+cat("dist_superfund_pfas summary:\n");   print(summary(Vuln$dist_superfund_pfas))
+cat("dist_superfund_npl summary:\n");    print(summary(Vuln$dist_superfund_npl))
+cat("dist_spills summary:\n");           print(summary(Vuln$dist_spills))
+cat("dist_part139_airports summary:\n"); print(summary(Vuln$dist_part139_airports))
+cat("dist_treatment_plants summary:\n"); print(summary(Vuln$dist_treatment_plants))
+cat("dist_onsite_systems summary:\n");   print(summary(Vuln$dist_onsite_systems))
 
 # ===========================================================================
 # STEP 6: Write output
