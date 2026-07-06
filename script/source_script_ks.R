@@ -1,15 +1,16 @@
 # ===========================================================================
-# Author: Kyndra Shea
-# Last updated: 05/7/2026
+# author: Kyndra Shea
+# last updated: 6/7/2026
 #
-# Predictors added:
+# predictors added:
 #   impact_pfas_sites, dist_pfas_sites
 #   dist_fed_known, dist_fed_suspected, dist_discharge
 #   dist_superfund_pfas, dist_superfund_npl, dist_spills
 #   dist_part139_airports, dist_treatment_plants, dist_onsite_systems
+#   dist_naics_XXXXXX (one per NAICS code matching Ellen's impact predictors)
 # ===========================================================================
 
-# Set up
+# set up
 library(spdep)
 library(tidyverse)
 library(readr)
@@ -18,12 +19,12 @@ library(sf)
 library(readxl)
 library(terra)
 
-# Establish target CRS for uniform spatial standards
+# establish target CRS for uniform spatial standards
 target_crs <- 5070  # NAD83 / CONUS Albers (meters)
 
 # ===========================================================================
-# STEP 1: Read in existing gpkg and remove deprecated individual columns
-# Note: commented out after first run — gpkg already cleaned
+# STEP 1: read in existing gpkg and remove deprecated individual columns
+# note: commented out after first run
 # ===========================================================================
 
 # Vuln <- st_read("/Users/kyndrashea/pfas-project/data/output/full_pfas_covars.gpkg")
@@ -35,13 +36,15 @@ target_crs <- 5070  # NAD83 / CONUS Albers (meters)
 #          delete_dsn = TRUE)
 
 # ===========================================================================
-# STEP 2: Read in wells and build source layers
+# STEP 2: read in wells and build source layers
 # ===========================================================================
 
-# Reproject for spatial operations
+Vuln <- st_read("/Users/kyndrashea/pfas-project/data/output/full_pfas_covars.gpkg")
+
+# reproject for spatial operations
 Vuln_m <- st_transform(Vuln, target_crs)
 
-# Helper to read Excel and convert to sf
+# helper to read Excel and convert to sf
 read_sf_points <- function(file, lat_col = "Latitude", lon_col = "Longitude", crs = 4326) {
   read_excel(file) %>%
     mutate(
@@ -52,7 +55,7 @@ read_sf_points <- function(file, lat_col = "Latitude", lon_col = "Longitude", cr
     st_as_sf(coords = c("longitude", "latitude"), crs = crs, remove = FALSE)
 }
 
-# Elevation raster — load only, do NOT reproject to save disk space
+# elevation raster — load only, do NOT reproject to save disk space
 elevation <- rast("/Users/kyndrashea/pfas-project/data/source/LF2020_Elev_CONUS/Tif/LF2020_Elev_CONUS.tif")
 elev_crs <- crs(elevation)
 
@@ -60,10 +63,10 @@ elev_crs <- crs(elevation)
 huc12 <- st_read("/Users/kyndrashea/pfas-project/data/source/HUC12/WBD_HUC12_CONUS_pulled10262020/WBD_HUC12_CONUS_pulled10262020.shp")
 huc12 <- st_transform(huc12, target_crs)
 
-# Assign HUC12 to wells
+# assign HUC12 to wells
 Vuln_m <- st_join(Vuln_m, huc12["huc12"])
 
-# Non-NAICS sources
+# non-NAICS sources
 
 cwns_path <- "/Users/kyndrashea/pfas-project/data/source/CWNS Data/2022CWNS_NATIONAL_APR2024"
 cwns_tables <- list.files(cwns_path, pattern = "\\.csv$", full.names = TRUE) %>%
@@ -154,7 +157,7 @@ naics_all_sf <- frs_combined %>%
   st_as_sf(coords = c("LONGITUDE83", "LATITUDE83"), crs = 4269) %>%
   st_transform(target_crs)
 
-# --- Combine all sources for collapsed predictors ---
+# combine all sources for collapsed predictors
 
 harmonize_sf <- function(x) {
   x %>% select(geometry) %>% st_transform(target_crs)
@@ -173,14 +176,14 @@ all_pfas_sources <- bind_rows(
   harmonize_sf(naics_all_sf)
 )
 
-# Attach HUC12 and elevation to combined sources (needed for impact score)
+# attach HUC12 and elevation to combined sources (needed for impact score)
 all_pfas_sources <- st_join(all_pfas_sources, huc12["huc12"])
 
 elev_vals <- terra::extract(elevation, terra::vect(st_transform(all_pfas_sources, elev_crs)))
 all_pfas_sources$elev <- elev_vals[, 2]
 all_pfas_sources$elev[all_pfas_sources$elev < -1000] <- NA
 
-# Attach HUC12 and elevation to wells (needed for impact score)
+# attach HUC12 and elevation to wells (needed for impact score)
 if (!"huc12" %in% names(Vuln_m)) {
   Vuln_m <- st_join(Vuln_m, huc12["huc12"])
 }
@@ -191,7 +194,7 @@ if (!"elev" %in% names(Vuln_m)) {
 }
 
 # ===========================================================================
-# STEP 3: Impact score function
+# STEP 3: impact score function
 # ===========================================================================
 
 impact_score <- function(from, to, max_dist = 5000,
@@ -229,7 +232,7 @@ impact_score <- function(from, to, max_dist = 5000,
 }
 
 # ===========================================================================
-# STEP 4: Compute impact_pfas_sites (collapsed NAICS + all sources)
+# STEP 4: compute impact_pfas_sites (collapsed NAICS + all sources)
 # ===========================================================================
 
 cat("Computing impact_pfas_sites...\n")
@@ -240,7 +243,7 @@ print(summary(Vuln$impact_pfas_sites))
 cat("Non-zero wells:", sum(Vuln$impact_pfas_sites > 0), "\n")
 
 # ===========================================================================
-# STEP 5: Compute dist_pfas_sites — minimum distance to any PFAS source
+# STEP 5: compute dist_pfas_sites (minimum distance to any PFAS source)
 # ===========================================================================
 
 cat("Finding nearest PFAS source for each well...\n")
@@ -257,7 +260,7 @@ cat("Wells within 5km:", sum(Vuln$dist_pfas_sites <= 5000), "\n")
 cat("Wells within 1km:", sum(Vuln$dist_pfas_sites <= 1000), "\n")
 
 # ===========================================================================
-# STEP 5b: Compute per-source distance variables (meters)
+# STEP 5b: compute per-source distance variables (meters)
 # ===========================================================================
 
 compute_dist <- function(wells_m, sources, var_name) {
@@ -278,7 +281,7 @@ Vuln[["dist_part139_airports"]] <- compute_dist(Vuln_m, part139_sf,         "dis
 Vuln[["dist_treatment_plants"]] <- compute_dist(Vuln_m, treatment_sf,       "dist_treatment_plants")
 Vuln[["dist_onsite_systems"]]   <- compute_dist(Vuln_m, onsite_sf,          "dist_onsite_systems")
 
-cat("All distance variables computed.\n")
+cat("All non-NAICS distance variables computed.\n")
 cat("dist_fed_known summary:\n");         print(summary(Vuln$dist_fed_known))
 cat("dist_fed_suspected summary:\n");    print(summary(Vuln$dist_fed_suspected))
 cat("dist_discharge summary:\n");        print(summary(Vuln$dist_discharge))
@@ -290,7 +293,56 @@ cat("dist_treatment_plants summary:\n"); print(summary(Vuln$dist_treatment_plant
 cat("dist_onsite_systems summary:\n");   print(summary(Vuln$dist_onsite_systems))
 
 # ===========================================================================
-# STEP 6: Write output
+# STEP 5c: Compute per-NAICS distance variables (meters)
+# One dist_naics_XXXXXX variable per NAICS code matching Ellen's impact predictors
+# ===========================================================================
+
+naics_for_dist <- c(
+  "212221", "212291", "212299", "212393",
+  "313210", "313230", "313320",
+  "314110", "314999",
+  "316110",
+  "322121", "322130",
+  "323111",
+  "324110", "324191",
+  "325120", "325193", "325199", "325211", "325212", "325510",
+  "325611", "325612", "325613", "325998",
+  "326112", "326113", "326121", "326130", "326211",
+  "327215", "327310",
+  "332812", "332813", "332999",
+  "334220", "334310", "334412", "334413", "334418", "334419", "334512",
+  "335911", "335912", "335931", "335999",
+  "424690", "442291", "488119", "561740",
+  "562112", "562211", "562212", "562213", "562219",
+  "811420", "928110"
+)
+
+for (naics_code in naics_for_dist) {
+  var_name <- paste0("dist_naics_", naics_code)
+  cat("Computing", var_name, "...\n")
+
+  sources_sf <- frs_combined %>%
+    filter(NAICS_STR == naics_code) %>%
+    filter(!is.na(LATITUDE83), !is.na(LONGITUDE83)) %>%
+    st_as_sf(coords = c("LONGITUDE83", "LATITUDE83"), crs = 4269) %>%
+    st_transform(target_crs)
+
+  if (nrow(sources_sf) == 0) {
+    cat("  No sources found for", var_name, "— filling with NA\n")
+    Vuln[[var_name]] <- NA_real_
+  } else {
+    nearest_idx <- st_nearest_feature(Vuln_m, sources_sf)
+    Vuln[[var_name]] <- as.numeric(
+      st_distance(Vuln_m, sources_sf[nearest_idx, ], by_element = TRUE)
+    )
+  }
+}
+
+cat("All NAICS distance variables computed.\n")
+cat("Total columns now:", ncol(Vuln), "\n")
+
+# ===========================================================================
+# STEP 6: write output
 # ===========================================================================
 
 output_path <- "/Users/kyndrashea/pfas-project/data/output/full_pfas_covars.gpkg"
