@@ -29,7 +29,6 @@ This project uses renv to manage R package dependencies, ensuring reproducibilit
 Clone the Repository:
 ```text
 git clone https://github.com/water-health-opportunity-lab/pfas-national-model.git # Replace with the actual URL
-cd ncwell
 ```
 
 Open the Project in RStudio: Open the pfas-national-model.Rproj file in RStudio. This will automatically activate the renv environment.
