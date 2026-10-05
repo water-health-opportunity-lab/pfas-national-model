@@ -3,7 +3,7 @@
 **Code repository for RIA and CDRF project**
 _"Innovative Transfer Learning for National Scale PFAS Prediction in Private Wells"_
 
-This project develops reproducible, data-driven workflows to predict PFAS contamination in private wells across the United States using transfer learning techniques. We utilize public datasets, geospatial methods, and exploratory data analysis in R.
+This project develops reproducible, data-driven workflows to predict PFAS groundwater contamination in across the United States using novel machine learning techniques. We use groundwater monitoring from thr USGS and US EPA to develop these models, with predictors obtained from various public datasets on PFAS sources, landscape characteristics, soil properties/geochemistry, and hydro-climatic factors.
 
 --- 
 ## 📁 Project Structure
