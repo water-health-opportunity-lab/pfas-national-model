@@ -79,7 +79,6 @@ git push -u origin feat/short-description
 ```
 
 Submit a pull request from your feature branch into develop.
-Tag @xindyhu for review.
 
 ## 📌 Project Status
 This project is in active development under the RIA and CDRF grant.
