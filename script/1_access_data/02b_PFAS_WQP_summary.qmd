@@ -1,0 +1,987 @@
+---
+title: "Preliminary Summary of PFAS data"
+format:
+  html:
+    fig-width: 15
+    fig-height: 5
+    fig-align: center
+editor: visual
+warning: false
+message: false
+toc: true
+code-fold: true
+self-contained: true
+---
+
+## Data
+
+First, we load the data. Note that the measured concentration levels are in different units (micrograms per liter or nanograms per liter). We transform them into the unit "nanograms per liter".
+
+```{r}
+# load packages
+library(dplyr)
+library(ggplot2)
+library(maps)
+library(scales)
+library(here)
+
+# load data
+data <- read.csv(here("data", "02_WQP_PFAS", 'PFAS_combined.csv'))
+data <- data[which(data$ActivityTypeCode == 'Sample-Routine'), ]
+
+# transform the units
+data <- data %>%
+  mutate(
+    ResultMeasureUnitCode = toupper(ResultMeasureUnitCode),  # normalize case
+    ResultMeasureValue = as.numeric(ResultMeasureValue),      # ensure numeric
+    ResultMeasureValue_ngL = case_when(
+      ResultMeasureUnitCode == "UG/L" ~ ResultMeasureValue * 1000,
+      ResultMeasureUnitCode == "NG/L" ~ ResultMeasureValue,
+      TRUE ~ NA_real_   # for unexpected units
+    ),
+    ResultMeasureUnitCode = "NG/L"  # set all to ng/L after conversion
+  )
+```
+
+## Summary
+
+### Censoring
+
+As an initial step, we assessed the censoring proportion for each analyte to understand the extent of data below detection limits.
+
+```{r}
+# Summarize censoring proportion by PFAS compound
+censor_summary <- data %>%
+  group_by(CharacteristicName) %>%
+  summarise(
+    total_n    = n(),
+    censored_n = sum(!is.na(ResultDetectionConditionText)),  # e.g., "Below Detection Limit"
+    detected_n = sum(is.na(ResultDetectionConditionText)),   # non-censored
+    censor_rate = round(100 * censored_n / total_n, 1)
+  ) %>%
+  arrange(desc(detected_n))
+
+# View top results
+print(censor_summary, n = 101)
+```
+
+Because many analytes exhibited high censoring rates, we excluded those with a censoring proportion greater than 80%. A summary of the remaining analytes is provided below as well. After this filtering step, the dataset retained 15,881 observations.
+
+```{r}
+# Filter for compounds with censor_rate < 80%
+censor_summary_below80 <- censor_summary %>%
+  filter(censor_rate < 80) %>%
+  arrange(censor_rate)
+
+# table
+library(knitr)
+kable(censor_summary_below80,
+      digits = 1,
+      align = c("l", "r", "r", "r", "r"),
+      col.names = c("Compound", "Total n", "Censored n", "Detected n", "Censor Rate (%)"))
+
+censor_filtered <- censor_summary %>% filter(censor_rate <= 80)
+data <- data %>% filter(CharacteristicName %in% censor_filtered$CharacteristicName)
+# sample size
+nrow(data)
+```
+
+And we decide to only keep the four analytes, (1) Perfluorooctanoic acid (PFOA), (2) Perfluorobutanoic acid (PFBA), (3) Perfluorooctanesulfonic acid (PFOS), and (4) Perfluoropentanoate (PFPEA).
+
+```{r}
+pfas_keep <- c(
+  "Perfluorooctanoic acid",
+  "Perfluorobutanoic acid",
+  "Perfluorooctanesulfonic acid",
+  "Perfluoropentanoate"
+)
+
+data <- data %>%
+  filter(CharacteristicName %in% pfas_keep) %>%
+  mutate(CharacteristicName = factor(CharacteristicName))   # drop levels automatically
+```
+
+### Detection Limits
+
+Next, we examined the detection limits, which are essential for estimating censoring probabilities. Similar to the concentration values, all detection limits were converted to a consistent unit of ng/L. The summary statistics indicate substantial variation in detection limits across samples. To better understand this variation, we further examined detection limits by their reported type, revealing that the scales of detection limits differ considerably across detection limit categories.
+
+```{r}
+data <- data %>%
+  mutate(
+    # Normalize case and whitespace
+    DetectionQuantitationLimitMeasureUnitCode = toupper(trimws(DetectionQuantitationLimitMeasureUnitCode)),
+    DetectionQuantitationLimitMeasureValue = as.numeric(DetectionQuantitationLimitMeasureValue),
+
+    # Convert all to ng/L
+    DetectionLimit_ngL = case_when(
+      DetectionQuantitationLimitMeasureUnitCode %in% c("UG/L") ~ DetectionQuantitationLimitMeasureValue * 1000,
+      DetectionQuantitationLimitMeasureUnitCode %in% c("NG/L") ~ DetectionQuantitationLimitMeasureValue,
+      DetectionQuantitationLimitMeasureUnitCode %in% c("NONE", "", NA) ~ NA_real_,  # handle missing or 'None'
+      TRUE ~ NA_real_  # for unexpected codes
+    ),
+
+    # Standardize unit label after conversion
+    DetectionQuantitationLimitMeasureUnitCode = "NG/L"
+  )
+
+# overall summary
+data %>%
+  summarise(
+    n_total     = n(),
+    n_non_na    = sum(!is.na(DetectionLimit_ngL)),
+    n_na        = sum(is.na(DetectionLimit_ngL)),
+    mean        = mean(DetectionLimit_ngL, na.rm = TRUE),
+    sd          = sd(DetectionLimit_ngL, na.rm = TRUE),
+    median      = median(DetectionLimit_ngL, na.rm = TRUE),
+    IQR         = IQR(DetectionLimit_ngL, na.rm = TRUE),
+    min         = min(DetectionLimit_ngL, na.rm = TRUE),
+    max         = max(DetectionLimit_ngL, na.rm = TRUE)
+  )
+
+# by the type of detection limit
+data %>%
+  group_by(DetectionQuantitationLimitTypeName) %>%
+  summarise(
+    n        = sum(!is.na(DetectionLimit_ngL)),
+    mean     = mean(DetectionLimit_ngL, na.rm = TRUE),
+    sd       = sd(DetectionLimit_ngL, na.rm = TRUE),
+    median   = median(DetectionLimit_ngL, na.rm = TRUE),
+    IQR      = IQR(DetectionLimit_ngL, na.rm = TRUE),
+    min      = min(DetectionLimit_ngL, na.rm = TRUE),
+    max      = max(DetectionLimit_ngL, na.rm = TRUE),
+    n_na     = sum(is.na(DetectionLimit_ngL))
+  ) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2))) %>%
+  arrange(desc(mean))
+```
+
+Note that
+
+- The **detection limit** is the smallest amount of a chemical that the lab’s instruments can confidently tell is present, even if the signal is very weak.
+
+- The **reporting limit** is a bit higher and represents the smallest amount that the lab is confident enough to report as a reliable measurement.
+
+When a result falls between these two limits, the instrument may have detected the chemical, but the lab might still list it as “non-detect” because the measurement is too uncertain. In simple terms, the detection limit shows what the lab can see, while the reporting limit shows what the lab trusts enough to report.
+
+There are 2,253 cases with missing detection limits; however, all of these correspond to samples with observed (non-censored) concentrations. Therefore, this issue is not of major concern. In subsequent modeling, small imputed values—substantially lower than the observed concentrations—can be assigned to these cases.
+
+```{r}
+# check missing
+data %>%
+  summarise(
+    n_total   = n(),
+    n_na_dl   = sum(is.na(DetectionLimit_ngL)),
+    n_na_dl_det = sum(is.na(DetectionLimit_ngL) & is.na(ResultDetectionConditionText)),
+    pct_det_na_dl = round(100 * n_na_dl_det / n_na_dl, 1)
+  )
+```
+
+Next, we examined the detection limits across different analytes. As shown in the table below, the detection limits vary substantially among analytes, suggesting that separate modeling for each analyte is needed.
+
+```{r}
+# Compound Summary
+compound_summary <- data %>%
+  group_by(CharacteristicName) %>%
+  summarise(
+    n_total  = n(),
+    n_non_na = sum(!is.na(DetectionLimit_ngL)),
+    n_na     = sum(is.na(DetectionLimit_ngL)),
+    mean     = mean(DetectionLimit_ngL, na.rm = TRUE),
+    sd       = sd(DetectionLimit_ngL, na.rm = TRUE),
+    median   = median(DetectionLimit_ngL, na.rm = TRUE),
+    IQR      = IQR(DetectionLimit_ngL, na.rm = TRUE),
+    min      = min(DetectionLimit_ngL, na.rm = TRUE),
+    max      = max(DetectionLimit_ngL, na.rm = TRUE)
+  ) %>%
+  arrange(desc(n_total))
+
+# format only the continuous stats (no scientific notation, 2 decimals, commas ok)
+fmt_num <- label_number(accuracy = 0.01, big.mark = ",", trim = TRUE)
+
+compound_summary <- compound_summary %>%
+  mutate(across(c(mean, sd, median, IQR, min, max), fmt_num))
+
+print(compound_summary, n = 100)
+```
+
+### Repeated measurements
+
+Next, we examine whether individual monitoring sites have multiple measurements for each PFAS compound, which may have been collected at different times. The table below summarizes these repeated measurements. Here,
+
+- `count` denotes the number of sites with multiple measurements for a given PFAS analyte.
+
+- `mean` and `max` represent, respectively, the average and maximum number of repeated measurements per site.
+
+- `mean_cv` indicates the average within-site coefficient of variation of those repeated measurements across all sites, while `max_cv` shows the largest within-site coefficient of variation observed for that analyte.
+
+Note that different analytes may have different scales in terms of concentration levels. For better interpretation, we use coefficient of variation instead of standard deviation.
+
+As shown in the table, substantial variability is observed in repeated measurements for certain analytes—particularly *Perfluorobutanoate*, *Perfluorooctanoic acid*, and *Perfluorohexanoic acid*—suggesting potential temporal fluctuations in concentration levels at specific locations.
+
+```{r}
+library(dplyr)
+
+# choose the cleaned numeric column (prefer ng/L if present)
+value_col <- if ("ResultMeasureValue_ngL" %in% names(data)) "ResultMeasureValue_ngL" else "ResultMeasureValue"
+
+# --- 1) Per-site counts & within-site CV ---
+site_stats <- data %>%
+  group_by(CharacteristicName, MonitoringLocationIdentifier) %>%
+  summarise(
+    n_meas  = sum(!is.na(.data[[value_col]])),
+    mean_value = mean(.data[[value_col]], na.rm = TRUE),
+    sd_value   = if (n_meas > 1) sd(.data[[value_col]], na.rm = TRUE) else NA_real_,
+    cv_value   = if (!is.na(mean_value) && mean_value != 0 && n_meas > 1)
+                   sd_value / mean_value
+                 else NA_real_,
+    .groups = "drop"
+  )
+
+# --- 2) Per-compound summary ---
+pfas_summary <- site_stats %>%
+  filter(n_meas > 1) %>%
+  group_by(CharacteristicName) %>%
+  summarise(
+    count   = n(),
+    mean = mean(n_meas, na.rm = TRUE),
+    max  = max(n_meas, na.rm = TRUE),
+    mean_cv   = mean(cv_value, na.rm = TRUE),
+    max_cv    = max(cv_value, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(count), CharacteristicName)
+
+# --- 3) Format for output ---
+pfas_summary_fmt <- pfas_summary %>%
+  mutate(
+    mean = formatC(mean, format = "f", digits = 1),
+    max  = formatC(max, format = "f", digits = 0),
+    mean_cv   = formatC(mean_cv, format = "f", digits = 2),
+    max_cv    = formatC(max_cv, format = "f", digits = 2),
+    count     = formatC(count, format = "d", big.mark = ",")
+  )
+
+print(pfas_summary_fmt, n = 100)
+```
+
+Next, we illustrate examples of sites with multiple measurements and large coefficient of variation and examine how their concentrations vary over time. Specifically, we consider *Perfluorobutanoic acid* (PFBA, 15 measurements), *Perfluorooctanoic acid* (PFOA, 4 measurements), and *Perfluorooctanesulfonic acid* (PFOS, 4 measurements).
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(ggplot2)
+})
+
+# --- simple date parser ---
+parse_date_safely <- function(x) {
+  if (inherits(x, "Date"))   return(as.Date(x))
+  if (inherits(x, "POSIXt")) return(as.Date(x))
+
+  x_chr <- as.character(x)
+  p <- suppressWarnings(as.POSIXct(
+    x_chr, tz = "UTC",
+    tryFormats = c(
+      "%Y-%m-%d", "%Y/%m/%d",
+      "%m/%d/%Y", "%m-%d-%Y",
+      "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S",
+      "%m/%d/%Y %H:%M:%S",
+      "%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M",
+      "%m/%d/%Y %H:%M", "%m-%d-%Y %H:%M",
+      "%Y-%m-%dT%H:%M:%OSZ", "%Y-%m-%dT%H:%M:%OS%z",
+      "%Y-%m-%dT%H:%M:%OS"
+    )
+  ))
+  as.Date(p)
+}
+
+
+# --- choose numeric column ---
+value_col <- if ("ResultMeasureValue_ngL" %in% names(data)) "ResultMeasureValue_ngL" else "ResultMeasureValue"
+
+# --- target compounds ---
+targets <- c("Perfluorobutanoic acid", "Perfluorooctanoic acid", "Perfluorooctanesulfonic acid")
+
+# --- Step 1: compute per-site CV ---
+site_cv <- data %>%
+  filter(CharacteristicName %in% targets) %>%
+  mutate(y = suppressWarnings(as.numeric(.data[[value_col]]))) %>%
+  group_by(CharacteristicName, MonitoringLocationIdentifier) %>%
+  summarise(
+    n_meas = sum(is.finite(y)),
+    mean_y = mean(y, na.rm = TRUE),
+    sd_y   = sd(y, na.rm = TRUE),
+    cv     = ifelse(n_meas > 1 & is.finite(mean_y) & mean_y != 0, sd_y / mean_y, NA_real_),
+    .groups = "drop"
+  )
+
+# --- Step 2: pick the site with most repeats among CV > 0.3 per compound ---
+top_sites <- site_cv %>%
+  filter(!is.na(cv), cv > 0.3, n_meas > 1) %>%
+  group_by(CharacteristicName) %>%
+  arrange(desc(n_meas), desc(cv)) %>%
+  slice_head(n = 1) %>%
+  ungroup()
+
+# --- Step 3: extract data for those sites ---
+panel_data <- data %>%
+  semi_join(top_sites, by = c("CharacteristicName", "MonitoringLocationIdentifier")) %>%
+  mutate(
+    date = parse_date_safely(AnalysisStartDate),
+    y = suppressWarnings(as.numeric(.data[[value_col]]))
+  ) %>%
+  filter(is.finite(y), !is.na(date)) %>%
+  left_join(
+    top_sites %>%
+      mutate(
+        Compound = case_when(
+          CharacteristicName == "Perfluorobutanoic acid" ~ "PFBA",
+          CharacteristicName == "Perfluorooctanoic acid" ~ "PFOA",
+          CharacteristicName == "Perfluorooctanesulfonic acid" ~ "PFOS",
+          TRUE ~ CharacteristicName
+        ),
+        site_label = paste0(MonitoringLocationIdentifier, " (CV=", round(cv, 2), ", n=", n_meas, ")")
+      ),
+    by = c("CharacteristicName", "MonitoringLocationIdentifier")
+  )
+
+# --- Step 4: make the plot ---
+ggplot(panel_data, aes(x = date, y = y, color = Compound)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ Compound, ncol = 3, scales = "free") +  # independent y-scales
+  scale_color_manual(values = c(
+    "PFBA" = "magenta",
+    "PFOA" = "deepskyblue",
+    "PFOS" = "indianred1"
+  )) +
+  labs(
+    title = "PFAS Time Series at Sites with Highest n and CV > 0.3",
+    subtitle = paste0(
+      paste0(unique(panel_data$Compound), ": ", unique(panel_data$site_label), collapse = " | ")
+    ),
+    x = "Analysis Start Date",
+    y = "Concentration (ng/L)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 10, color = "gray40"),
+    legend.position = "none"
+  )
+```
+
+Among repeated measurements, we decide to keep the most recent measurement only.
+
+```{r}
+pfba_repeats_before <- data %>%
+  filter(CharacteristicName == "Perfluorobutanoic acid") %>%
+  count(MonitoringLocationIdentifier, name = "n_meas") %>%
+  arrange(desc(n_meas))
+
+total_extra_measurements <- pfba_repeats_before %>%
+  summarise(sum(n_meas - 1)) %>%
+  pull()
+
+total_extra_measurements
+
+
+data <- data %>%
+  mutate(
+    meas_date = parse_date_safely(AnalysisStartDate),
+    # Fill NA dates with a very early date, so real dates always win
+    meas_date_filled = if_else(
+      is.na(meas_date),
+      as.Date("1900-01-01"),
+      meas_date
+    )
+  ) %>%
+  group_by(CharacteristicName, MonitoringLocationIdentifier) %>%
+  slice_max(meas_date_filled, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+# Check how many rows per site × compound
+check_repeats <- data %>%
+  count(CharacteristicName, MonitoringLocationIdentifier, name = "n_rows") %>%
+  filter(n_rows > 1)
+
+check_repeats
+```
+
+### Detection Method
+
+There are different detection methods according to the data. A detailed description and the number of cases are provided below.
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(stringr)
+  library(knitr)
+})
+
+# summarize counts by simplified method groups
+method_summary <- as.data.frame(table(data$ResultAnalyticalMethodName), stringsAsFactors = FALSE) %>%
+  as_tibble() %>%
+  rename(method_raw = Var1, count = Freq) %>%
+  mutate(
+    method_group = case_when(
+      str_detect(method_raw, fixed("PFAS SPE/LC/MS/MS SGS FL EPA537M", ignore_case = TRUE)) ~ "PFAS SPE/LC/MS/MS SGS FL EPA537M",
+      str_detect(method_raw, regex("\\bEPA\\s*1633\\b", ignore_case = TRUE)) |
+        str_detect(method_raw, fixed("AXYS MLA-110", ignore_case = TRUE)) ~ "EPA 1633 (incl. modified/AXYS)",
+      str_detect(method_raw, regex("\\bEPA\\s*537\\.1\\b", ignore_case = TRUE)) ~ "EPA 537.1",
+      str_detect(method_raw, regex("\\bEPA\\s*533\\b", ignore_case = TRUE)) ~ "EPA 533",
+      str_detect(method_raw, fixed("Exygen Protocol P0002561", ignore_case = TRUE)) ~ "PFCs by LC/MS/MS (Exygen P0002561)",
+      str_detect(method_raw, fixed("Perfluorinated Compounds (PFCs) by LC/MS/MS", ignore_case = TRUE)) ~ "PFCs by LC/MS/MS (generic)",
+      str_detect(method_raw, fixed("Perfluorocarbons wu cent", ignore_case = TRUE)) ~ "Perfluorocarbons (wu cent) LCMSMS",
+      str_detect(method_raw, fixed("PFAAs, wu, SPE/LC/MS/MS", ignore_case = TRUE)) ~ "PFAAs (wu) SPE/LC/MS/MS",
+      str_detect(method_raw, fixed("PFAAs, SPE/LC/MS/MS (CANBVMON)", ignore_case = TRUE)) ~ "PFAAs SPE/LC/MS/MS (CANBVMON)",
+      str_detect(method_raw, fixed("N.C. Division of Water Resources", ignore_case = TRUE)) ~ "NC DWR PFAS method",
+      str_detect(method_raw, fixed("WIPFAS", ignore_case = TRUE)) ~ "WIPFAS",
+      str_detect(method_raw, fixed("DOD QSM", ignore_case = TRUE)) |
+        str_detect(method_raw, fixed("DoDESP", ignore_case = TRUE)) ~ "DoD QSM PFAS (water)",
+      str_detect(method_raw, regex("\\b8260\\s*C?\\b", ignore_case = TRUE)) ~ "VOC 8260C by GC/MS",
+      str_detect(method_raw, fixed("Purgeable Organics", ignore_case = TRUE)) ~ "Purgeable Organics (non-PFAS)",
+      TRUE ~ "Other/Unmapped"
+    ),
+    description = case_when(
+      method_group == "PFAS SPE/LC/MS/MS SGS FL EPA537M" ~ "PFAS by SPE + LC-MS/MS at SGS Florida using modified EPA 537",
+      method_group == "EPA 1633 (incl. modified/AXYS)" ~ "PFAS by EPA 1633/modified; multi-matrix (water/solids/tissue)",
+      method_group == "EPA 537.1" ~ "PFAS in drinking water by EPA 537.1",
+      method_group == "EPA 533" ~ "PFAS in drinking water by EPA 533 (short-chain focus)",
+      method_group == "PFCs by LC/MS/MS (Exygen P0002561)" ~ "PFAS/PFCs by LC-MS/MS under Exygen protocol P0002561",
+      method_group == "PFCs by LC/MS/MS (generic)" ~ "Generic PFAS/PFCs LC-MS/MS method",
+      method_group == "Perfluorocarbons (wu cent) LCMSMS" ~ "Perfluorocarbons LC-MS/MS (wu cent label)",
+      method_group == "PFAAs (wu) SPE/LC/MS/MS" ~ "Perfluoroalkyl acids in water via SPE/LC-MS/MS",
+      method_group == "PFAAs SPE/LC/MS/MS (CANBVMON)" ~ "PFAA SPE/LC-MS/MS (CANBVMON label)",
+      method_group == "NC DWR PFAS method" ~ "North Carolina Division of Water Resources PFAS method",
+      method_group == "WIPFAS" ~ "Wisconsin PFAS method",
+      method_group == "DoD QSM PFAS (water)" ~ "PFAS (water) by DoD Quality Systems Manual",
+      method_group == "VOC 8260C by GC/MS" ~ "Volatile organic compounds by EPA 8260C GC/MS (non-PFAS)",
+      method_group == "Purgeable Organics (non-PFAS)" ~ "Purgeable organics in wastewater (non-PFAS)",
+      TRUE ~ "—"
+    )
+  ) %>%
+  group_by(method_group, description) %>%
+  summarise(count = sum(count), .groups = "drop") %>%
+  arrange(desc(count))
+
+# print
+kable(method_summary, align = c("l", "l", "r"))
+```
+
+Next, we can further look at the mean of the detection limits by PFAS analyte and detection method.
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(stringr)
+  library(knitr)
+})
+
+# --- Helper: map analytical methods into simplified groups ---
+method_map <- function(x) {
+  case_when(
+    str_detect(x, fixed("PFAS SPE/LC/MS/MS SGS FL EPA537M", ignore_case = TRUE)) ~ "PFAS SPE/LC/MS/MS SGS FL EPA537M",
+    str_detect(x, regex("\\bEPA\\s*1633\\b", ignore_case = TRUE)) |
+      str_detect(x, fixed("AXYS MLA-110", ignore_case = TRUE)) ~ "EPA 1633 (incl. modified/AXYS)",
+    str_detect(x, regex("\\bEPA\\s*537\\.1\\b", ignore_case = TRUE)) ~ "EPA 537.1",
+    str_detect(x, regex("\\bEPA\\s*533\\b", ignore_case = TRUE)) ~ "EPA 533",
+    str_detect(x, fixed("Exygen Protocol P0002561", ignore_case = TRUE)) ~ "PFCs by LC/MS/MS (Exygen P0002561)",
+    str_detect(x, fixed("Perfluorinated Compounds (PFCs) by LC/MS/MS", ignore_case = TRUE)) ~ "PFCs by LC/MS/MS (generic)",
+    str_detect(x, fixed("Perfluorocarbons wu cent", ignore_case = TRUE)) ~ "Perfluorocarbons (wu cent) LCMSMS",
+    str_detect(x, fixed("PFAAs, wu, SPE/LC/MS/MS", ignore_case = TRUE)) ~ "PFAAs (wu) SPE/LC/MS/MS",
+    str_detect(x, fixed("PFAAs, SPE/LC/MS/MS (CANBVMON)", ignore_case = TRUE)) ~ "PFAAs SPE/LC/MS/MS (CANBVMON)",
+    str_detect(x, fixed("N.C. Division of Water Resources", ignore_case = TRUE)) ~ "NC DWR PFAS method",
+    str_detect(x, fixed("WIPFAS", ignore_case = TRUE)) ~ "WIPFAS",
+    str_detect(x, fixed("DOD QSM", ignore_case = TRUE)) |
+      str_detect(x, fixed("DoDESP", ignore_case = TRUE)) ~ "DoD QSM PFAS (water)",
+    TRUE ~ "Other/Unmapped"
+  )
+}
+
+library(dplyr)
+library(knitr)
+
+# --- detection method mapping (reuse your helper if already defined) ---
+method_map <- function(x) {
+  case_when(
+    grepl("PFAS SPE/LC/MS/MS SGS FL EPA537M", x, ignore.case = TRUE) ~ "PFAS SPE/LC/MS/MS SGS FL EPA537M",
+    grepl("EPA 1633|AXYS MLA-110", x, ignore.case = TRUE) ~ "EPA 1633 (incl. modified/AXYS)",
+    grepl("EPA 537\\.1", x, ignore.case = TRUE) ~ "EPA 537.1",
+    grepl("EPA 533", x, ignore.case = TRUE) ~ "EPA 533",
+    grepl("Exygen Protocol P0002561", x, ignore.case = TRUE) ~ "PFCs by LC/MS/MS (Exygen P0002561)",
+    grepl("Perfluorinated Compounds \\(PFCs\\) by LC/MS/MS", x, ignore.case = TRUE) ~ "PFCs by LC/MS/MS (generic)",
+    grepl("Perfluorocarbons wu cent", x, ignore.case = TRUE) ~ "Perfluorocarbons (wu cent) LCMSMS",
+    grepl("PFAAs, wu, SPE/LC/MS/MS", x, ignore.case = TRUE) ~ "PFAAs (wu) SPE/LC/MS/MS",
+    grepl("PFAAs, SPE/LC/MS/MS \\(CANBVMON\\)", x, ignore.case = TRUE) ~ "PFAAs SPE/LC/MS/MS (CANBVMON)",
+    grepl("N.C. Division of Water Resources", x, ignore.case = TRUE) ~ "NC DWR PFAS method",
+    grepl("WIPFAS", x, ignore.case = TRUE) ~ "WIPFAS",
+    grepl("DOD QSM|DoDESP", x, ignore.case = TRUE) ~ "DoD QSM PFAS (water)",
+    TRUE ~ "Other/Unmapped"
+  )
+}
+
+# --- Summarize mean detection limit by method AND compound ---
+mean_detection_limit_by_compound <- data %>%
+  mutate(method_group = method_map(ResultAnalyticalMethodName)) %>%
+  group_by(CharacteristicName, method_group) %>%
+  summarise(
+    n_obs = sum(!is.na(DetectionLimit_ngL)),
+    mean_DetectionLimit_ngL = mean(DetectionLimit_ngL, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(CharacteristicName, desc(mean_DetectionLimit_ngL))
+
+# --- Display nicely ---
+kable(mean_detection_limit_by_compound,
+      digits = 2,
+      align = c("l", "l", "r", "r"),
+      col.names = c("PFAS Compound", "Detection Method", "N", "Mean Detection Limit (ng/L)"))
+```
+
+We also looked at the histograms of detection limits for PFBA, PFOA, and PFOS across different detection methods. The plot below shows that the detection limits vary quite a bit from one method to another, even for the same compound.
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(ggplot2)
+  library(scales)
+})
+
+# ---- 1. Detection method mapping (shortened for readability) ----
+method_map <- function(x) {
+  case_when(
+    grepl("PFAS SPE/LC/MS/MS SGS FL EPA537M", x, ignore.case = TRUE) ~ "SGS FL EPA537M",
+    grepl("EPA 1633|AXYS MLA-110", x, ignore.case = TRUE) ~ "EPA 1633 / AXYS",
+    grepl("EPA 537\\.1", x, ignore.case = TRUE) ~ "EPA 537.1",
+    grepl("EPA 533", x, ignore.case = TRUE) ~ "EPA 533",
+    grepl("Exygen Protocol P0002561", x, ignore.case = TRUE) ~ "Exygen P0002561",
+    grepl("Perfluorinated Compounds \\(PFCs\\) by LC/MS/MS", x, ignore.case = TRUE) ~ "PFCs LC/MS/MS",
+    grepl("Perfluorocarbons wu cent", x, ignore.case = TRUE) ~ "Perfluorocarbons (wu cent)",
+    grepl("PFAAs, wu, SPE/LC/MS/MS", x, ignore.case = TRUE) ~ "PFAAs (wu) SPE/LC/MS/MS",
+    grepl("DOD QSM|DoDESP", x, ignore.case = TRUE) ~ "DoD QSM (water)",
+    TRUE ~ "Other/Unmapped"
+  )
+}
+
+# ---- 2. Select target PFAS compounds ----
+targets <- c(
+  "Perfluorobutanoic acid",
+  "Perfluorooctanoic acid",
+  "Perfluorooctanesulfonic acid",
+  "Perfluoropentanoate"
+)
+
+# ---- 3. Prepare data ----
+df_plot <- data %>%
+  filter(CharacteristicName %in% targets) %>%
+  mutate(
+    method_group = method_map(ResultAnalyticalMethodName),
+    DetectionLimit_ngL = suppressWarnings(as.numeric(DetectionLimit_ngL)),
+    Compound = recode(
+      CharacteristicName,
+      "Perfluorobutanoic acid"       = "PFBA",
+      "Perfluorooctanoic acid"       = "PFOA",
+      "Perfluorooctanesulfonic acid" = "PFOS",
+      "Perfluoropentanoate"          = "PFPEA"
+    )
+  ) %>%
+  filter(is.finite(DetectionLimit_ngL)) %>%
+  group_by(Compound, method_group) %>%
+  filter(n() >= 30) %>%   # keep only method–compound groups with >= 30 observations
+  ungroup()
+
+# ---- 4. Color-blind–friendly palette (Okabe–Ito) ----
+okabe_ito <- c(
+  "#E69F00", "#56B4E9", "#009E73", "#F0E442",
+  "#0072B2", "#D55E00", "#CC79A7", "#999999"
+)
+
+# ---- 5. Plot: four panels, overlaid histograms by method ----
+ggplot(df_plot, aes(x = DetectionLimit_ngL, color = method_group)) +
+  geom_histogram(
+    bins = 30,
+    fill = NA,
+    linewidth = 1,
+    alpha = 0.8,
+    position = "identity"
+  ) +
+  facet_wrap(~ Compound, ncol = 2, scales = "free_x") +
+  scale_x_log10(labels = label_number(accuracy = 1)) +
+  scale_color_manual(values = okabe_ito) +
+  labs(
+    title = "Detection Limit Distributions for PFBA, PFOA, PFOS, and PFPEA",
+    subtitle = "Histograms by detection method (only groups with n ≥ 30)",
+    x = "Detection Limit (ng/L, log scale)",
+    y = "Count",
+    color = "Detection Method"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title    = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 10, color = "gray40"),
+    legend.position = "bottom",
+    legend.title    = element_text(size = 11)
+  )
+```
+
+Next, we can also take a look at the tail quantiles of the detection limits for different analytes at quantile levels 0.25, 0.50, 0.75, 0.80, 0.85, 0.90, 0.95, and 0.98.
+
+```{r}
+quantile_results <- df_plot %>%
+  group_by(Compound) %>%
+  summarize(
+    n   = n(),
+    q25 = quantile(DetectionLimit_ngL, 0.25, na.rm = TRUE),
+    q50 = quantile(DetectionLimit_ngL, 0.50, na.rm = TRUE),
+    q75 = quantile(DetectionLimit_ngL, 0.75, na.rm = TRUE),
+    q80 = quantile(DetectionLimit_ngL, 0.80, na.rm = TRUE),
+    q85 = quantile(DetectionLimit_ngL, 0.85, na.rm = TRUE),
+    q90 = quantile(DetectionLimit_ngL, 0.90, na.rm = TRUE),
+    q95 = quantile(DetectionLimit_ngL, 0.95, na.rm = TRUE),
+    q98 = quantile(DetectionLimit_ngL, 0.98, na.rm = TRUE)
+  ) %>%
+  arrange(Compound)
+
+quantile_results
+```
+
+### Exploratory data analysis of PFBA, PFOA, PFOS, and PFPEA
+
+Next, we examine the measurement date distributions for each analyte. A small number of records appear to have dates prior to 1950. Upon further inspection, the majority of these early-dated observations correspond to non-detects, suggesting that they are likely due to data entry or formatting issues rather than true historical measurements.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+targets <- c(
+  "Perfluorooctanoic acid",        # PFOA
+  "Perfluorooctanesulfonic acid",  # PFOS
+  "Perfluorobutanoic acid",        # PFBA
+  "Perfluoropentanoate"            # PFPEA
+)
+
+date_panel <- data %>%
+  filter(CharacteristicName %in% targets) %>%
+  mutate(
+    meas_date = parse_date_safely(AnalysisStartDate),
+    Compound = case_when(
+      CharacteristicName == "Perfluorooctanoic acid"        ~ "PFOA",
+      CharacteristicName == "Perfluorooctanesulfonic acid"  ~ "PFOS",
+      CharacteristicName == "Perfluorobutanoic acid"        ~ "PFBA",
+      CharacteristicName == "Perfluoropentanoate"           ~ "PFPEA"
+    )
+  )
+
+ggplot(filter(date_panel, !is.na(meas_date)),
+       aes(x = meas_date, color = Compound)) +
+  geom_histogram(
+    binwidth = 365,
+    fill = "white",
+    linewidth = 0.8
+  ) +
+  facet_wrap(~ Compound, ncol = 2, scales = "free_y") +
+  scale_color_manual(values = c(
+    "PFOS"  = "magenta",
+    "PFOA"  = "deepskyblue",
+    "PFBA"  = "indianred1",
+    "PFPEA" = "royalblue"
+  )) +
+  labs(
+    title = "Measurement Date Distribution for Selected PFAS Analytes",
+    x = "Analysis Start Date",
+    y = "Number of Measurements",
+    color = "Compound"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+bad_dates <- data %>%
+  filter(CharacteristicName %in% targets) %>%
+  mutate(
+    meas_date = parse_date_safely(AnalysisStartDate),
+    Compound = case_when(
+      CharacteristicName == "Perfluorobutanoic acid"        ~ "PFBA",
+      CharacteristicName == "Perfluorooctanoic acid"        ~ "PFOA",
+      CharacteristicName == "Perfluorooctanesulfonic acid"  ~ "PFOS"
+    ),
+    value_ngL = suppressWarnings(as.numeric(ResultMeasureValue_ngL))
+  ) %>%
+  filter(
+    !is.na(meas_date),
+    meas_date < as.Date("1950-01-01")
+  ) %>%
+  transmute(
+    Compound,
+    meas_date,
+    value_ngL,
+    censor = !is.na(ResultDetectionConditionText),
+    MonitoringLocationIdentifier,
+    RawDate = AnalysisStartDate
+  )
+bad_dates %>%
+  count(Compound, censor) %>%
+  tidyr::pivot_wider(
+    names_from = censor,
+    values_from = n,
+    values_fill = 0,
+    names_prefix = "censor_"
+  )
+```
+
+And we proceed to only keep the measurements after 2000.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+targets <- c(
+  "Perfluorooctanoic acid",        # PFOA
+  "Perfluorooctanesulfonic acid",  # PFOS
+  "Perfluorobutanoic acid",        # PFBA
+  "Perfluoropentanoate"            # PFPEA
+)
+
+# 1) Parse dates and filter to year >= 2000
+data <- data %>%
+  filter(CharacteristicName %in% targets) %>%
+  mutate(
+    meas_date = parse_date_safely(AnalysisStartDate)
+  ) %>%
+  filter(!is.na(meas_date),
+         meas_date >= as.Date("2000-01-01"))
+
+
+# 2) Add compound labels after filtering
+date_panel <- data %>%
+  mutate(
+    Compound = case_when(
+      CharacteristicName == "Perfluorooctanoic acid"        ~ "PFOA",
+      CharacteristicName == "Perfluorooctanesulfonic acid"  ~ "PFOS",
+      CharacteristicName == "Perfluorobutanoic acid"        ~ "PFBA",
+      CharacteristicName == "Perfluoropentanoate"           ~ "PFPEA"
+    )
+  )
+
+# Quick sanity check on the date range
+range(data$meas_date)
+
+# 3) Plot (now automatically restricted to 2000+)
+ggplot(date_panel, aes(x = meas_date, color = Compound)) +
+  geom_histogram(
+    binwidth = 365,
+    fill = "white",
+    linewidth = 0.8
+  ) +
+  facet_wrap(~ Compound, ncol = 2, scales = "free_y") +
+  scale_color_manual(values = c(
+    "PFOS"  = "magenta",
+    "PFOA"  = "deepskyblue",
+    "PFBA"  = "indianred1",
+    "PFPEA" = "royalblue"
+  )) +
+  labs(
+    title = "Measurement Date Distribution for Selected PFAS Analytes (2000+)",
+    x = "Analysis Start Date",
+    y = "Number of Measurements",
+    color = "Compound"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+```
+
+After applying the filtering steps, we re-examine the data summary. All four analytes exhibit very high censoring rates, indicating that a substantial proportion of measurements fall below the detection limit.
+
+```{r}
+# Summarize censoring proportion by PFAS compound
+censor_summary <- data %>%
+  group_by(CharacteristicName) %>%
+  summarise(
+    total_n    = n(),
+    censored_n = sum(!is.na(ResultDetectionConditionText)),  # e.g., "Below Detection Limit"
+    detected_n = sum(is.na(ResultDetectionConditionText)),   # non-censored
+    censor_rate = round(100 * censored_n / total_n, 1)
+  ) %>%
+  arrange(desc(detected_n))
+
+# table
+kable(censor_summary,
+      digits = 1,
+      align = c("l", "r", "r", "r", "r"),
+      col.names = c("Compound", "Total n", "Censored n", "Detected n", 
+                    "Censor Rate (%)"))
+```
+
+Moreover, we summarize and visualize the distributions of Perfluorooctanoic acid (PFOA), Perfluorooctanesulfonic acid (PFOS), Perfluorobutanoic acid (PFBA), and Perfluoropentanoate (PFPEA). Across all four compounds, the concentration levels exhibit a pronounced right-skewed pattern, with most measurements clustered at low concentrations and a small number of sites showing substantially elevated values.
+
+```{r}
+# --- Filter for PFOA, PFOS, and PFBA ---
+data$ResultMeasureValue_ngL <- as.numeric(data$ResultMeasureValue_ngL)
+
+pfas_subset <- data %>%
+  filter(CharacteristicName %in% c("Perfluorooctanoic acid",
+                                   "Perfluorooctanesulfonic acid",
+                                   "Perfluorobutanoic acid",
+                                   "Perfluoropentanoate"))
+
+# --- Summary statistics ---
+pfas_summary <- pfas_subset %>%
+  group_by(CharacteristicName) %>%
+  summarise(
+    n      = n(),
+    mean   = mean(ResultMeasureValue_ngL, na.rm = TRUE),
+    sd     = sd(ResultMeasureValue_ngL, na.rm = TRUE),
+    median = median(ResultMeasureValue_ngL, na.rm = TRUE),
+    IQR    = IQR(ResultMeasureValue_ngL, na.rm = TRUE),
+    min    = min(ResultMeasureValue_ngL, na.rm = TRUE),
+    max    = max(ResultMeasureValue_ngL, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+print(pfas_summary)
+
+# --- Rename compounds for display ---
+pfas_subset <- pfas_subset %>%
+  mutate(Compound = case_when(
+    CharacteristicName == "Perfluorooctanesulfonic acid" ~ "PFOS",
+    CharacteristicName == "Perfluorooctanoic acid" ~ "PFOA",
+    CharacteristicName == "Perfluorobutanoic acid" ~ "PFBA",
+    CharacteristicName == "Perfluoropentanoate" ~ "PFPEA",
+    TRUE ~ CharacteristicName
+  ))
+
+# --- Histogram by compound ---
+ggplot(pfas_subset, aes(x = log(ResultMeasureValue_ngL + 1), color = Compound)) +
+  geom_histogram(bins = 30, size = 0.8, fill = "white") +
+  scale_color_manual(values = c(
+    "PFOS" = "magenta",
+    "PFOA" = "deepskyblue",
+    "PFBA" = "indianred1",
+    "PFPEA" = "royalblue"
+  )) +
+  facet_wrap(~ Compound, scales = "free_y") +
+  labs(
+    x = "log(Concentration + 1)",
+    y = "Count",
+    title = "Distribution of PFBA, PFOA, and PFOS Concentrations (log-transformed)"
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    strip.text = element_text(face = "bold", size = 16),   # facet labels
+    axis.title = element_text(size = 18),                  # axis titles
+    axis.text  = element_text(size = 14),                  # tick labels
+    plot.title = element_text(size = 20, face = "bold", hjust = 0.5), # centered title
+    legend.position = "none"
+  )
+
+```
+
+Moreover, we could take a look at the spatial distribution of the concentration levels of PFOA and PFOS.
+
+```{r, fig.width=15, fig.height=10}
+library(dplyr)
+library(ggplot2)
+library(maps)
+library(scales)
+
+# -------- 1) Prepare data --------
+targets <- c("Perfluorooctanoic acid",
+             "Perfluorooctanesulfonic acid",
+             "Perfluorobutanoic acid",
+             "Perfluoropentanoate")
+
+pfas_xy <- data %>%
+  filter(CharacteristicName %in% targets) %>%
+  transmute(
+    Compound = case_when(
+      CharacteristicName == "Perfluorooctanoic acid"        ~ "PFOA",
+      CharacteristicName == "Perfluorooctanesulfonic acid"  ~ "PFOS",
+      CharacteristicName == "Perfluorobutanoic acid"        ~ "PFBA",
+      CharacteristicName == "Perfluoropentanoate"           ~ "PFPEA"
+    ),
+    lon   = as.numeric(MonitoringLocationLongitudeMeasure),
+    lat   = as.numeric(MonitoringLocationLatitudeMeasure),
+    value = as.numeric(ResultMeasureValue_ngL),
+    is_censored = is.na(ResultMeasureValue_ngL)
+  ) %>%
+  filter(is.finite(lon), is.finite(lat))
+
+# Split detected vs censored once
+detected <- filter(pfas_xy, !is_censored)
+censored <- filter(pfas_xy,  is_censored)
+
+# US map borders
+states <- map_data("state")
+
+# -------- 2) Reusable plotting function --------
+pfas_map <- function(compound_label) {
+  det <- detected %>% filter(Compound == compound_label)
+  cen <- censored %>% filter(Compound == compound_label)
+
+  ggplot() +
+    # --- State borders (black) ---
+    geom_polygon(
+      data = states, aes(x = long, y = lat, group = group),
+      fill = NA, color = "black", linewidth = 0.4, inherit.aes = FALSE
+    ) +
+    # --- Censored (grey crosses, semi-transparent, larger) ---
+    geom_point(
+      data = cen, aes(lon, lat),
+      shape = 4, stroke = 1.1, size = 3.2,
+      color = "grey40", alpha = 0.4,
+      inherit.aes = FALSE
+    ) +
+    # --- Detected (white → red1, α ∝ value, slightly larger) ---
+    geom_point(
+      data = det, aes(lon, lat, color = value, alpha = value),
+      size = 3.4, inherit.aes = FALSE
+    ) +
+    # --- Natural-log scaling for color & alpha ---
+    scale_color_gradient(
+      low = "white", high = "red1",
+      trans = "log",
+      name = "Concentration (ng/L)",
+      labels = label_number(accuracy = 1)
+    ) +
+    scale_alpha_continuous(
+      trans = "log", range = c(0.3, 0.9), guide = "none"
+    ) +
+    coord_quickmap() +
+    labs(
+      title = paste(compound_label, "Spatial Distribution"),
+      subtitle = "red = detected (ln ng/L); grey × = censored (NA)",
+      x = NULL, y = NULL
+    ) +
+    theme_minimal(base_size = 22) +
+    theme(
+      panel.grid = element_blank(),
+      axis.text   = element_text(size = 18),
+      legend.text = element_text(size = 18),
+      legend.title = element_text(size = 20, face = "bold"),
+      plot.title = element_text(size = 28, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 20, hjust = 0.5)
+    )
+}
+
+# -------- 3) Create separate figures --------
+p_pfoa  <- pfas_map("PFOA")
+p_pfos  <- pfas_map("PFOS")
+p_pfba  <- pfas_map("PFBA")
+p_pfpea <- pfas_map("PFPEA")
+
+# -------- 4) Display or save (each figure large) --------
+p_pfoa
+p_pfos
+p_pfba
+p_pfpea
+
+# # Optional: high-resolution export
+# ggsave("PFAS_PFOA_map.png",  p_pfoa,  width = 12, height = 7, dpi = 300)
+# ggsave("PFAS_PFOS_map.png",  p_pfos,  width = 12, height = 7, dpi = 300)
+# ggsave("PFAS_PFBA_map.png",  p_pfba,  width = 12, height = 7, dpi = 300)
+# ggsave("PFAS_PFPEA_map.png", p_pfpea, width = 12, height = 7, dpi = 300)
+```
