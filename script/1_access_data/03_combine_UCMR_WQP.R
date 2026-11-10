@@ -7,8 +7,8 @@
 library(here)
 library(tidyverse)
 
-ucmr <- read.csv(here("data", "output", "final_UCMR5_data_with_locations.csv"))
-WQP <- read.csv(here("data", "output", "PFAS_WQP.csv"))
+ucmr <- read.csv(here("data", "04_UCMR5_PFAS", "final_UCMR5_data_with_locations.csv"))
+WQP <- read.csv(here("data", "02_WQP_PFAS", "PFAS_WQP.csv"))
 
 WQP <- WQP %>% 
   dplyr::select(PWSID_or_MonitoringLocationIdentifier = MonitoringLocationIdentifier, 
@@ -56,4 +56,4 @@ WQP <- WQP %>%
 combined_dat <- rbind(WQP, ucmr_long)
 
 
-write.csv(combined_dat, here("data", "output", "UCMR_WQP_PFAS_combined.csv"))
+write.csv(combined_dat, here("data", "05_UCMR_WQP_PFAS_combined", "UCMR_WQP_PFAS_combined.csv"))
