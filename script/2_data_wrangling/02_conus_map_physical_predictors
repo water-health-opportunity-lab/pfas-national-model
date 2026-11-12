@@ -1,5 +1,5 @@
 # --------------------------------------------------------
-# Building 1km by 1km CONUS Map for Physical Vulnerability Predictors
+# Building 1km by 1km CONUS Map for Physical Predictors
 #
 # Smith, 2013
 # - A-Horizon Organic Carbon
@@ -44,7 +44,7 @@
 # - Quickflow
 # Shangguan, 2017
 # - Depth to Bedrock
-# U.S. Geological Survey, 2024
+# U.S. Geological Survey, 1996
 # - Elevation
 # Wieczorek, 2014
 # - Organic Matter
@@ -52,7 +52,7 @@
 # - Rock Lithology
 #
 # Author: Kyndra Shea
-# Last updated: 2026-11-06
+# Last updated: 2026-11-12
 # --------------------------------------------------------
 
 ### LOAD PACKAGES ###
@@ -61,6 +61,7 @@ library(dplyr)
 library(FNN)
 library(foreign)
 library(gstat)
+library(here)
 library(janitor)
 library(readr)
 library(readxl)
@@ -80,14 +81,13 @@ knn_k          <- 5             # neighbors for kNN imputation
 
 ### BUILD CONUS GRID ###
 
-grid_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/",
-  "nonextracted_CONUS_grid.geojson"
+grid_path <- here(
+  "data", "07_SL_validation",
+  "01_nonextracted_CONUS_grid", "nonextracted_CONUS_grid.geojson"
 )
 
-grid_out_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/output/",
-  "conus_grid_filtered.gpkg"
+grid_out_path <- here(
+  "data", "07_SL_validation", "02_output", "conus_grid_filtered.gpkg"
 )
 
 # CRS: NAD83 / Conus Albers (EPSG:5070)
@@ -176,13 +176,13 @@ knn_vote <- function(x) {
 
 ### SMITH, 2013 ###
 
-a_horizon_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/SoilGeochemistry/",
+a_horizon_path <- here(
+  "data", "01_sample_data", "SoilGeochemistry",
   "Appendix_3a_Ahorizon_18Sept2013.xlsx"
 )
 
-c_horizon_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/SoilGeochemistry/",
+c_horizon_path <- here(
+  "data", "01_sample_data", "SoilGeochemistry",
   "Appendix_4a_Chorizon_18Sept2013.xlsx"
 )
 
@@ -250,9 +250,8 @@ for (v in chem_vars_c) grid_covars[[v]] <- idw_at_pts(v, c_sf, grid_pts)
 
 ### U.S. GEOLOGICAL SURVEY, 2003 ###
 
-aquifer_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/aquifers/",
-  "us_aquifers.shp"
+aquifer_path <- here(
+  "data", "01_sample_data", "aquifers", "us_aquifers.shp"
 )
 
 aquifers_v <- sf::st_read(aquifer_path, quiet = TRUE) |>
@@ -275,16 +274,16 @@ grid_covars$aquifer_lithology <- knn_vote(grid_covars$aquifer_lithology)
 
 ### ZELL AND SANFORD, 2020 ###
 
-trans_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/Output_CONUS_trans/",
+trans_path <- here(
+  "data", "01_sample_data", "Output_CONUS_trans",
   "conus_MF6_SS_Unconfined_250_trans.tif"
 )
-unsattt_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/Output_CONUS_unsat/",
+unsattt_path <- here(
+  "data", "01_sample_data", "Output_CONUS_unsat",
   "conus_MF6_SS_Unconfined_250_tt_total.tif"
 )
-unsatwc_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/Output_CONUS_unsat/",
+unsatwc_path <- here(
+  "data", "01_sample_data", "Output_CONUS_unsat",
   "conus_MF6_SS_Unconfined_250_wc_avg.tif"
 )
 
@@ -314,12 +313,9 @@ for (nm in names(zs_paths)) {
 
 ### WOLOCK, 2003 ###
 
-bfi_path      <- "/Users/kyndrashea/pfas-project/data/input/bfi48grd"
-recharge_path <- "/Users/kyndrashea/pfas-project/data/input/rech48grd"
-slope_path    <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/hlrshape/",
-  "hlrus.shp"
-)
+bfi_path      <- here("data", "01_sample_data", "bfi48grd")
+recharge_path <- here("data", "01_sample_data", "rech48grd")
+slope_path    <- here("data", "01_sample_data", "hlrshape", "hlrus.shp")
 
 # BFI and recharge: 1 km rasters already in EPSG:5070
 
@@ -353,10 +349,7 @@ for (nm in c("bfi", "recharge", "slope")) {
 
 ### WALKINSHAW, 2020 ###
 
-walkinshaw_dir <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/",
-  "Walkinshaw, 2020"
-)
+walkinshaw_dir <- here("data", "01_sample_data", "Walkinshaw, 2020")
 
 walkinshaw_paths <- c(
   awc        = file.path(walkinshaw_dir, "water_storage.tif"),
@@ -382,14 +375,11 @@ for (nm in names(walkinshaw_paths)) {
 
 ### ENVIROATLAS, 2025 ###
 
-huc12_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/",
-  "WBD_National_GPKG/WBD_National_GPKG.gpkg"
+huc12_path <- here(
+  "data", "01_sample_data", "WBD_National_GPKG", "WBD_National_GPKG.gpkg"
 )
-landcover_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/",
-  "LandCover_CONUS.csv"
-)
+
+landcover_path <- here("data", "01_sample_data", "LandCover_CONUS.csv")
 
 lc_vars <- c("p_devland", "p_hwetlands", "p_forest", "p_pasture")
 
@@ -437,9 +427,8 @@ for (nm in lc_vars) {
 
 ### KAUFFMAN, 2021 ###
 
-welldepth_bottom_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/",
-  "domestic_grids/domestic_bottom_open.asc"
+welldepth_bottom_path <- here(
+  "data", "01_sample_data", "domestic_grids", "domestic_bottom_open.asc"
 )
 
 # Depth to bottom of open interval (feet below land surface)
@@ -457,9 +446,8 @@ grid_covars$well_depth <- knn_median(grid_covars$well_depth)
 
 ### LAMOTTE, 2018 ###
 
-nsep_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/",
-  "SepN_CONUS_bg2010/SepN_CONUS_bg_2010.shp"
+nsep_path <- here(
+  "data", "01_sample_data", "SepN_CONUS_bg2010", "SepN_CONUS_bg_2010.shp"
 )
 
 # Septic N per km2 of land area (ALAND10 in m2)
@@ -489,9 +477,9 @@ grid_covars$n_sep_km2 <- knn_median(grid_covars$n_sep_km2)
 
 ### PRISM, 2021 ###
 
-precip_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/prism/",
-  "ppt_us_30s_2020_avg30y/prism_ppt_us_30s_2020_avg_30y.tif"
+precip_path <- here(
+  "data", "01_sample_data", "prism", "ppt_us_30s_2020_avg30y",
+  "prism_ppt_us_30s_2020_avg_30y.tif"
 )
 
 precip_r   <- terra::rast(precip_path)[[1]]
@@ -505,11 +493,10 @@ grid_covars$precip <- knn_median(grid_covars$precip)
 
 ### REITZ AND SANFORD, 2017 ###
 
-et_path <- "/Users/kyndrashea/pfas-project/data/input/ET_0013.tif"
+et_path <- here("data", "01_sample_data", "ET_0013.tif")
 
-quickflow_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/",
-  "QuickFlow0013/RO_0013.tif"
+quickflow_path <- here(
+  "data", "01_sample_data", "QuickFlow0013", "RO_0013.tif"
 )
 
 # Values in m/yr (average annual, 2000-2013)
@@ -532,9 +519,8 @@ for (nm in names(rs_paths)) {
 
 ### SHANGGUAN, 2017 ###
 
-bedrock_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/",
-  "Output_CONUS_unsat/BDTICM_M_250m_ll.tif"
+bedrock_path <- here(
+  "data", "01_sample_data", "Output_CONUS_unsat", "BDTICM_M_250m_ll.tif"
 )
 
 # Absolute depth to bedrock (cm); zeros retained as reported
@@ -550,9 +536,9 @@ grid_covars$bedrock_depth <- terra::extract(
 
 grid_covars$bedrock_depth <- knn_median(grid_covars$bedrock_depth)
 
-### U.S. GEOLOGICAL SURVEY, 2024 ###
+### U.S. GEOLOGICAL SURVEY, 1996 ###
 
-elev_path <- "/Users/kyndrashea/pfas-project/data/input/Elevation_US.tif"
+elev_path <- here("data", "01_sample_data", "Elevation_US.tif")
 
 # GTOPO30 (30 arc-second); ocean cells stored as 0, so no missing cells
 
@@ -563,12 +549,11 @@ grid_covars$elev <- terra::extract(elev_r, elev_pts, ID = FALSE)[[1]]
 
 ### WIECZOREK, 2014 ###
 
-mukey_rast_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/MUKEY_90m/",
-  "MapunitRaster_CONUS_90m1.tif"
+mukey_rast_path <- here(
+  "data", "01_sample_data", "MUKEY_90m", "MapunitRaster_CONUS_90m1.tif"
 )
 
-layer_dbf_path <- "/Users/kyndrashea/pfas-project/data/input/Layer.dbf"
+layer_dbf_path <- here("data", "01_sample_data", "Layer.dbf")
 
 # Organic matter (%) by mukey; -9999 = NA
 
@@ -599,14 +584,10 @@ grid_covars$org_matter <- knn_median(grid_covars$org_matter)
 
 ### ATOR AND ANNING, 2017 ###
 
-lith_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/",
-  "geolpoly/geol_poly.shp"
-)
+lith_path <- here("data", "01_sample_data", "geolpoly", "geol_poly.shp")
 
-rocktypes_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/",
-  "geolpoly_rocktypes/geol_poly_rocktypes.dbf"
+rocktypes_path <- here(
+  "data", "01_sample_data", "geolpoly_rocktypes", "geol_poly_rocktypes.dbf"
 )
 
 # Rock type lookup by map unit
@@ -646,8 +627,8 @@ grid_covars$lith <- knn_vote(grid_covars$lith)
 
 ### SAVE OUTPUT ###
 
-out_gpkg <- file.path(
-  "/Users/kyndrashea/pfas-project/data/output/",
+out_gpkg <- here(
+  "data", "07_SL_validation", "02_output",
   "conus_map_physical_predictors.gpkg"
 )
 
