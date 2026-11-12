@@ -83,6 +83,7 @@
 library(dplyr)
 library(foreign)
 library(gstat)
+library(here)
 library(janitor)
 library(purrr)
 library(readr)
@@ -100,62 +101,120 @@ target_crs <- 5070L
 idp_default <- 2
 nmax_default <- 12
 distance_cap <- 50000
-well_depth_cap <- 500
 
 options(tigris_use_cache = TRUE)
 
 ### PATHS ###
 
-wells_csv_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input/wellsites/",
-  "UCMR_WQP_PFAS_combined.csv"
+wells_csv_path <- here(
+  "data", "05_UCMR_WQP_PFAS_combined", "UCMR_WQP_PFAS_combined.csv"
 )
 
-huc12_path <- "/Users/kyndrashea/pfas-project/data/input/WBD_National_GPKG/WBD_National_GPKG.gpkg"
-mukey_rast_path <- "/Users/kyndrashea/pfas-project/data/input/MUKEY_90m/MapunitRasterCONUS90m1.tif"
+huc12_path <- here(
+  "data", "01_sample_data", "WBD_National_GPKG", "WBD_National_GPKG.gpkg"
+)
+mukey_rast_path <- here(
+  "data", "01_sample_data", "MUKEY_90m", "MapunitRasterCONUS90m1.tif"
+)
 
-aquifer_path <- "/Users/kyndrashea/pfas-project/data/input/aquifers/usa_aquifers.shp"
-a_horizon_path <- "/Users/kyndrashea/pfas-project/data/input/SoilGeochemistry/Appendix3a_AHorizon_18Sept2013.xlsx"
-c_horizon_path <- "/Users/kyndrashea/pfas-project/data/input/SoilGeochemistry/Appendix4a_CHorizon_18Sept2013.xlsx"
-popdens_path <- "/Users/kyndrashea/pfas-project/data/input/pden2010block/pden2010_60m.tif"
-nsep_path <- "/Users/kyndrashea/pfas-project/data/input/SepN_CONUS_bg2010/SepN_CONUS_bg2010.shp"
-lith_path <- "/Users/kyndrashea/pfas-project/data/input/geolpoly/geolpoly.shp"
-rocktypes_path <- "/Users/kyndrashea/pfas-project/data/input/geolpoly_rocktypes/geolpoly_rocktypes.dbf"
-tile_drainage_path <- "/Users/kyndrashea/pfas-project/data/input/AgTile-US-TIFF/AgTile-US.tif"
-landuse_path <- "/Users/kyndrashea/pfas-project/data/input/lu2012_050815"
-landcover_path <- "/Users/kyndrashea/pfas-project/data/input/LandCoverCONUS.csv"
-streambuffer_path <- "/Users/kyndrashea/pfas-project/data/input/AgBuffers.csv"
-elev_path <- "/Users/kyndrashea/pfas-project/data/input/ElevationUS.tif"
-slope_path <- "/Users/kyndrashea/pfas-project/data/input/hlrshape/hlrus.shp"
-streamdensity_path <- "/Users/kyndrashea/pfas-project/data/input/stmdenhuc12"
-layer_dbf_path <- "/Users/kyndrashea/pfas-project/data/input/Layer.dbf"
-walkinshaw_dir <- "/Users/kyndrashea/pfas-project/data/input/Walkinshaw, 2020"
-clay_path <- "/Users/kyndrashea/pfas-project/data/input/clay05.tif"
-sand_path <- "/Users/kyndrashea/pfas-project/data/input/sand05.tif"
-silt_path <- "/Users/kyndrashea/pfas-project/data/input/silt05.tif"
-bfi_path <- "/Users/kyndrashea/pfas-project/data/input/bfi48grd"
-bedrock_path <- "/Users/kyndrashea/pfas-project/data/input/BDTICM_M_250m_ll.tif"
-dtw_path <- "/Users/kyndrashea/pfas-project/data/input/Output_CONUS_trans/dtw_conus_MF6_SS_Unconfined_250/dtw.tif"
-recharge_path <- "/Users/kyndrashea/pfas-project/data/input/rech48grd"
-trans_path <- "/Users/kyndrashea/pfas-project/data/input/Output_CONUS_trans/dtw_conus_MF6_SS_Unconfined_250/trans.tif"
-unsattt_path <- "/Users/kyndrashea/pfas-project/data/input/Output_CONUS_unsat/traveltime_conus_MF6_SS_Unconfined_250/tt_total.tif"
-unsatwc_path <- "/Users/kyndrashea/pfas-project/data/input/Output_CONUS_unsat/watercontent_conus_MF6_SS_Unconfined_250/wc_avg.tif"
-et_path <- "/Users/kyndrashea/pfas-project/data/input/0013ET/0013.tif"
-quickflow_path <- "/Users/kyndrashea/pfas-project/data/input/QuickFlow0013/RO0013.tif"
-precip_path <- "/Users/kyndrashea/pfas-project/data/input/prism/ppt_us_30s_2020_avg30y/prism_ppt_us_30s_2020_avg30y.tif"
-welldepth_top_path <- "/Users/kyndrashea/pfas-project/data/input/domestic_grids/domestic_top_open.asc"
-welldepth_bottom_path <- "/Users/kyndrashea/pfas-project/data/input/domestic_grids/domestic_bottom_open.asc"
+aquifer_path <- here(
+  "data", "01_sample_data", "aquifers", "usa_aquifers.shp"
+)
+a_horizon_path <- here(
+  "data", "01_sample_data", "SoilGeochemistry",
+  "Appendix3a_AHorizon_18Sept2013.xlsx"
+)
+c_horizon_path <- here(
+  "data", "01_sample_data", "SoilGeochemistry",
+  "Appendix4a_CHorizon_18Sept2013.xlsx"
+)
+popdens_path <- here(
+  "data", "01_sample_data", "pden2010block", "pden2010_60m.tif"
+)
+nsep_path <- here(
+  "data", "01_sample_data", "SepN_CONUS_bg2010", "SepN_CONUS_bg2010.shp"
+)
+lith_path <- here(
+  "data", "01_sample_data", "geolpoly", "geolpoly.shp"
+)
+rocktypes_path <- here(
+  "data", "01_sample_data", "geolpoly_rocktypes", "geolpoly_rocktypes.dbf"
+)
+tile_drainage_path <- here(
+  "data", "01_sample_data", "AgTile-US-TIFF", "AgTile-US.tif"
+)
+landuse_path <- here("data", "01_sample_data", "lu2012_050815")
+landcover_path <- here("data", "01_sample_data", "LandCoverCONUS.csv")
+streambuffer_path <- here("data", "01_sample_data", "AgBuffers.csv")
+elev_path <- here("data", "01_sample_data", "ElevationUS.tif")
+slope_path <- here("data", "01_sample_data", "hlrshape", "hlrus.shp")
+streamdensity_path <- here("data", "01_sample_data", "stmdenhuc12")
+layer_dbf_path <- here("data", "01_sample_data", "Layer.dbf")
+walkinshaw_dir <- here("data", "01_sample_data", "Walkinshaw, 2020")
+clay_path <- here("data", "01_sample_data", "clay05.tif")
+sand_path <- here("data", "01_sample_data", "sand05.tif")
+silt_path <- here("data", "01_sample_data", "silt05.tif")
+bfi_path <- here("data", "01_sample_data", "bfi48grd")
+bedrock_path <- here("data", "01_sample_data", "BDTICM_M_250m_ll.tif")
+dtw_path <- here(
+  "data", "01_sample_data", "Output_CONUS_trans",
+  "dtw_conus_MF6_SS_Unconfined_250", "dtw.tif"
+)
+recharge_path <- here("data", "01_sample_data", "rech48grd")
+trans_path <- here(
+  "data", "01_sample_data", "Output_CONUS_trans",
+  "dtw_conus_MF6_SS_Unconfined_250", "trans.tif"
+)
+unsattt_path <- here(
+  "data", "01_sample_data", "Output_CONUS_unsat",
+  "traveltime_conus_MF6_SS_Unconfined_250", "tt_total.tif"
+)
+unsatwc_path <- here(
+  "data", "01_sample_data", "Output_CONUS_unsat",
+  "watercontent_conus_MF6_SS_Unconfined_250", "wc_avg.tif"
+)
+et_path <- here("data", "01_sample_data", "0013ET", "0013.tif")
+quickflow_path <- here(
+  "data", "01_sample_data", "QuickFlow0013", "RO0013.tif"
+)
+precip_path <- here(
+  "data", "01_sample_data", "prism", "ppt_us_30s_2020_avg30y",
+  "prism_ppt_us_30s_2020_avg30y.tif"
+)
+welldepth_bottom_path <- here(
+  "data", "01_sample_data", "domestic_grids", "domestic_bottom_open.asc"
+)
 
-cwns_path <- "/Users/kyndrashea/pfas-project/data/input/CWNS Data 2022/CWNS_NATIONAL_APR2024"
-federal_path <- "/Users/kyndrashea/pfas-project/data/input/source/Federal Sites PFAS Analytic.xlsx"
-superfund_pfas_path <- "/Users/kyndrashea/pfas-project/data/input/source/Superfund PFAS Analytic.xlsx"
-spills_path <- "/Users/kyndrashea/pfas-project/data/input/source/Spills Data PFAS Analytic.xlsx"
-superfund_npl_path <- "/Users/kyndrashea/pfas-project/data/input/source/Superfund/Superfund National Priorities List NPL Sites with Status Information.shp"
-part139_path <- "/Users/kyndrashea/pfas-project/data/input/source/NTAD/AviationFacilities/6916451147882473169_Aviation_Facilities.shp"
-frs_facility_path <- "/Users/kyndrashea/pfas-project/data/input/national_combined/NATIONAL_FACILITY_FILE.CSV"
-frs_naics_path <- "/Users/kyndrashea/pfas-project/data/input/national_combined/NATIONAL_NAICS_FILE.CSV"
+cwns_path <- here(
+  "data", "01_sample_data", "CWNS Data 2022", "CWNS_NATIONAL_APR2024"
+)
+federal_path <- here(
+  "data", "01_sample_data", "source", "Federal Sites PFAS Analytic.xlsx"
+)
+superfund_pfas_path <- here(
+  "data", "01_sample_data", "source", "Superfund PFAS Analytic.xlsx"
+)
+spills_path <- here(
+  "data", "01_sample_data", "source", "Spills Data PFAS Analytic.xlsx"
+)
+superfund_npl_path <- here(
+  "data", "01_sample_data", "source", "Superfund",
+  "Superfund National Priorities List NPL Sites with Status Information.shp"
+)
+part139_path <- here(
+  "data", "01_sample_data", "source", "NTAD", "AviationFacilities",
+  "6916451147882473169_Aviation_Facilities.shp"
+)
+frs_facility_path <- here(
+  "data", "01_sample_data", "national_combined", "NATIONAL_FACILITY_FILE.CSV"
+)
+frs_naics_path <- here(
+  "data", "01_sample_data", "national_combined", "NATIONAL_NAICS_FILE.CSV"
+)
 
-output_gpkg <- "/Users/kyndrashea/pfas-project/data/output/wells_covars_physical_source_updated.gpkg"
+output_gpkg <- here(
+  "data", "output", "wells_covars_physical_source_updated.gpkg"
+)
 
 ### HELPER FUNCTIONS ###
 
@@ -220,7 +279,9 @@ extract_raster_values <- function(wells, raster_path, method = "simple") {
   extracted[[2]]
 }
 
-read_sf_points <- function(file, lat_col = "Latitude", lon_col = "Longitude") {
+read_sf_points <- function(file,
+                           lat_col = "Latitude",
+                           lon_col = "Longitude") {
   readxl::read_excel(file) %>%
     dplyr::mutate(
       latitude = suppressWarnings(as.numeric(.data[[lat_col]])),
@@ -1036,26 +1097,10 @@ for (variable_name in names(hydro_raster_paths)) {
 
 ### WELL DEPTH ###
 
-well_depth_top <- extract_raster_values(
-  wells_covars,
-  welldepth_top_path
-)
-
-well_depth_bottom <- extract_raster_values(
+wells_covars$well_depth <- extract_raster_values(
   wells_covars,
   welldepth_bottom_path
 )
-
-wells_covars <- wells_covars %>%
-  dplyr::mutate(
-    well_depth = abs(well_depth_bottom - well_depth_top),
-    well_depth = dplyr::if_else(
-      .data$well_depth > 0 &
-        .data$well_depth <= well_depth_cap,
-      .data$well_depth,
-      NA_real_
-    )
-  )
 
 wells_covars$well_depth <- impute_median(
   wells_covars$well_depth
