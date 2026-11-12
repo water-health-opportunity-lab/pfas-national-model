@@ -595,8 +595,22 @@ c_predictions <- lapply(
   wells_sp = wells_sp
 )
 
-names(a_predictions) <- chem_vars_a
-names(c_predictions) <- chem_vars_c
+# Rename to match the covariate table
+chem_names <- c(
+  acorg = "a_c_org",
+  cal = "c_al",
+  camorph = "c_amorph",
+  ccorg = "c_c_org",
+  cca = "c_ca",
+  cfe = "c_fe",
+  ccalcite = "c_calcite",
+  ck = "c_k",
+  cp = "c_p",
+  ctotclay = "c_tot_clay"
+)
+
+names(a_predictions) <- chem_names[chem_vars_a]
+names(c_predictions) <- chem_names[chem_vars_c]
 
 soil_geochem_tbl <- dplyr::bind_cols(
   tibble::as_tibble(a_predictions),
@@ -610,13 +624,13 @@ wells_covars <- dplyr::bind_cols(
 
 ### POPULATION DENSITY ###
 
-wells_covars$popdens <- extract_raster_values(
+wells_covars$pop_dens <- extract_raster_values(
   wells_covars,
   popdens_path
 )
 
-wells_covars$popdens <- impute_median(
-  wells_covars$popdens
+wells_covars$pop_dens <- impute_median(
+  wells_covars$pop_dens
 )
 
 ### ESTIMATED SEPTIC NITROGEN ###
@@ -627,7 +641,7 @@ nsep_sf <- sf::st_read(
 ) %>%
   dplyr::mutate(
     area_km2 = as.numeric(.data$ALAND10) / 1e6,
-    nsep_km2 = as.numeric(.data$NSEP2010) / .data$area_km2
+    n_sep_km2 = as.numeric(.data$NSEP2010) / .data$area_km2
   ) %>%
   sf::st_transform(target_crs)
 
@@ -638,17 +652,17 @@ wells_5070 <- sf::st_transform(
 
 nsep_join <- sf::st_join(
   wells_5070,
-  nsep_sf %>% dplyr::select(nsep_km2),
+  nsep_sf %>% dplyr::select(n_sep_km2),
   left = TRUE,
   join = sf::st_intersects
 )
 
-wells_covars$nsep_km2 <- sf::st_drop_geometry(
+wells_covars$n_sep_km2 <- sf::st_drop_geometry(
   nsep_join
-)$nsep_km2
+)$n_sep_km2
 
-wells_covars$nsep_km2 <- impute_median(
-  wells_covars$nsep_km2
+wells_covars$n_sep_km2 <- impute_median(
+  wells_covars$n_sep_km2
 )
 
 ### LITHOLOGY ###
@@ -777,8 +791,8 @@ landuse_tbl <- landuse_extract %>%
   dplyr::filter(!is.na(.data$landclass)) %>%
   dplyr::mutate(
     landgroup = dplyr::case_when(
-      .data$landclass %in% ag_codes ~ "ag_landuse",
-      TRUE ~ "natural_landuse"
+      .data$landclass %in% ag_codes ~ "ag_land_use",
+      TRUE ~ "nat_land_use"
     )
   ) %>%
   dplyr::count(
@@ -812,25 +826,25 @@ wells_covars <- wells_covars %>%
   ) %>%
   dplyr::select(-rowid) %>%
   dplyr::mutate(
-    ag_landuse = dplyr::coalesce(.data$ag_landuse, 0),
-    natural_landuse = dplyr::coalesce(
-      .data$natural_landuse,
+    ag_land_use = dplyr::coalesce(.data$ag_land_use, 0),
+    nat_land_use = dplyr::coalesce(
+      .data$nat_land_use,
       0
     )
   )
 
-landuse_total <- wells_covars$ag_landuse +
-  wells_covars$natural_landuse
+landuse_total <- wells_covars$ag_land_use +
+  wells_covars$nat_land_use
 
-wells_covars$ag_landuse <- dplyr::if_else(
+wells_covars$ag_land_use <- dplyr::if_else(
   landuse_total > 0,
-  100 * wells_covars$ag_landuse / landuse_total,
+  100 * wells_covars$ag_land_use / landuse_total,
   0
 )
 
-wells_covars$natural_landuse <- dplyr::if_else(
+wells_covars$nat_land_use <- dplyr::if_else(
   landuse_total > 0,
-  100 * wells_covars$natural_landuse / landuse_total,
+  100 * wells_covars$nat_land_use / landuse_total,
   0
 )
 
@@ -846,19 +860,19 @@ landcover_tbl <- readr::read_csv(
       width = 12,
       pad = "0"
     ),
-    pcropland = suppressWarnings(as.numeric(.data$PAGC)),
-    pdevland = suppressWarnings(as.numeric(.data$PDEV)),
-    phwetlands = suppressWarnings(as.numeric(.data$PWETL95)),
-    pforest = suppressWarnings(as.numeric(.data$PFOR)),
-    ppasture = suppressWarnings(as.numeric(.data$PAGP))
+    p_cropland = suppressWarnings(as.numeric(.data$PAGC)),
+    p_devland = suppressWarnings(as.numeric(.data$PDEV)),
+    p_hwetlands = suppressWarnings(as.numeric(.data$PWETL95)),
+    p_forest = suppressWarnings(as.numeric(.data$PFOR)),
+    p_pasture = suppressWarnings(as.numeric(.data$PAGP))
   )
 
 landcover_vars <- c(
-  "pcropland",
-  "pdevland",
-  "phwetlands",
-  "pforest",
-  "ppasture"
+  "p_cropland",
+  "p_devland",
+  "p_hwetlands",
+  "p_forest",
+  "p_pasture"
 )
 
 wells_covars <- wells_covars %>%
@@ -937,13 +951,13 @@ wells_covars$slope <- impute_median(
 
 ### STREAM DENSITY ###
 
-wells_covars$stream_density <- extract_raster_values(
+wells_covars$stm_den <- extract_raster_values(
   wells_covars,
   streamdensity_path
 )
 
-wells_covars$stream_density <- impute_median(
-  wells_covars$stream_density
+wells_covars$stm_den <- impute_median(
+  wells_covars$stm_den
 )
 
 ### BULK DENSITY AND ORGANIC MATTER ###
@@ -1074,14 +1088,14 @@ wells_covars <- wells_covars %>%
 hydro_raster_paths <- c(
   bfi = bfi_path,
   bedrock_depth = bedrock_path,
-  depth_to_water = dtw_path,
+  dtw = dtw_path,
   recharge = recharge_path,
-  transmissivity = trans_path,
-  unsat_travel_time = unsattt_path,
-  unsat_water_content = unsatwc_path,
-  evapotranspiration = et_path,
+  trans = trans_path,
+  unsat_tt = unsattt_path,
+  unsat_wc = unsatwc_path,
+  et = et_path,
   quickflow = quickflow_path,
-  precipitation = precip_path
+  precip = precip_path
 )
 
 for (variable_name in names(hydro_raster_paths)) {
