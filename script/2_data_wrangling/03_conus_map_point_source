@@ -1,5 +1,5 @@
 # --------------------------------------------------------
-# Building 1km by 1km CONUS Map for Physical Vulnerability Predictors
+# Building 1km by 1km CONUS Map for Point Source Predictors
 #
 # - Suspected federal PFAS site
 # - Superfund site
@@ -10,13 +10,14 @@
 # - Collapsed NAICS
 #
 # Author: Kyndra Shea & Ellen Wei
-# Last updated: 2026-11-02
+# Last updated: 2026-11-12
 # --------------------------------------------------------
 
 ### LOAD PACKAGES ###
 
 library(dplyr)
 library(FNN)
+library(here)
 library(readxl)
 library(sf)
 library(terra)
@@ -28,16 +29,16 @@ dist_cap <- 50000   # meters
 
 ### LOAD CONUS GRID ###
 
-grid_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/output/",
+grid_path <- here(
+  "data", "07_SL_validation", "02_output",
   "conus_map_physical_predictors.gpkg"
 )
 
-# Read cell_id only
+# Read cell_id and geometry only
 
 grid_vect <- terra::vect(
   grid_path,
-  query = "SELECT cell_id FROM conus_physical_predictors"
+  query = "SELECT cell_id, geom FROM conus_physical_predictors"
 )
 
 grid_covars <- data.frame(cell_id = grid_vect$cell_id)
@@ -56,9 +57,8 @@ dist_nearest <- function(src_sf) {
 
 ### SUSPECTED FEDERAL PFAS SITE ###
 
-federal_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input",
-  "Source/Federal Sites_PFASAnalytic.xlsx"
+federal_path <- here(
+  "data", "01_sample_data", "Source", "Federal Sites_PFASAnalytic.xlsx"
 )
 
 federal_sf <- readxl::read_excel(federal_path) |>
@@ -87,9 +87,8 @@ for (nm in "dist_fed_suspected") {
 
 ### SUPERFUND SITE ###
 
-superfund_pfas_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input",
-  "Source/Superfund_PFASAnalytic.xlsx"
+superfund_pfas_path <- here(
+  "data", "01_sample_data", "Source", "Superfund_PFASAnalytic.xlsx"
 )
 
 superfund_pfas_sf <- readxl::read_excel(superfund_pfas_path) |>
@@ -114,9 +113,8 @@ grid_covars$dist_superfund_pfas <- pmin(
 
 ### SUPERFUND NPL SITE ###
 
-superfund_npl_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input",
-  "Source/Superfund/",
+superfund_npl_path <- here(
+  "data", "01_sample_data", "Source", "Superfund",
   "Superfund_National_Priorities_List_(NPL)_Sites_with_Status_Information.shp"
 )
 
@@ -132,9 +130,8 @@ grid_covars$dist_superfund_npl <- pmin(
 
 ### PFAS SPILL SITE ###
 
-spills_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input",
-  "Source/SpillsData_PFASAnalytic.xlsx"
+spills_path <- here(
+  "data", "01_sample_data", "Source", "SpillsData_PFASAnalytic.xlsx"
 )
 
 spills_sf <- readxl::read_excel(spills_path) |>
@@ -159,9 +156,8 @@ grid_covars$dist_spills <- pmin(
 
 ### PART 139 AIRPORT ###
 
-part139_airports_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input",
-  "Source/NTAD/Aviation_Facilities.shp"
+part139_airports_path <- here(
+  "data", "01_sample_data", "Source", "NTAD", "Aviation_Facilities.shp"
 )
 
 part139_airports_sf <- sf::st_read(part139_airports_path, quiet = TRUE) |>
@@ -179,10 +175,7 @@ grid_covars$dist_part139_airports <- pmin(
 
 ### TREATMENT PLANT ###
 
-cwns_dir <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input",
-  "CWNS Data 2022"
-)
+cwns_dir <- here("data", "01_sample_data", "CWNS Data 2022")
 
 cwns_facilities <- readr::read_csv(
   file.path(cwns_dir, "FACILITIES.csv"), show_col_types = FALSE
@@ -217,14 +210,12 @@ grid_covars$dist_treatment_plants <- pmin(
 
 ### COLLAPSED NAICS ###
 
-frs_facility_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input",
-  "national_combined/NATIONAL_FACILITY_FILE.csv"
+frs_facility_path <- here(
+  "data", "01_sample_data", "national_combined", "NATIONAL_FACILITY_FILE.csv"
 )
 
-frs_naics_path <- file.path(
-  "/Users/kyndrashea/pfas-project/data/input",
-  "national_combined/NATIONAL_NAICS_FILE.csv"
+frs_naics_path <- here(
+  "data", "01_sample_data", "national_combined", "NATIONAL_NAICS_FILE.csv"
 )
 
 naics_for_distance <- c(
@@ -293,9 +284,8 @@ grid_covars$dist_naics_collapsed <- pmin(
 
 ### SAVE OUTPUT ###
 
-out_gpkg <- file.path(
-  "/Users/kyndrashea/pfas-project/data/output/",
-  "conus_map_predictors.gpkg"
+out_gpkg <- here(
+  "data", "07_SL_validation", "02_output", "conus_map_predictors.gpkg"
 )
 
 # Physical predictors (attribute table only, no geometry)
