@@ -52,3 +52,9 @@ rsconnect/
 
 # data files
 data
+<<<<<<< HEAD
+=======
+
+# figures for now
+figures
+>>>>>>> 6ff98ad (updating PFAS data processing scripts)

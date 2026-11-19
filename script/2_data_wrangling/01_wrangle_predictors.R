@@ -1,0 +1,1375 @@
+# --------------------------------------------------------
+# Establish Well Sites and Physical and Source Predictors
+#
+# Establish Well Locations
+#
+# Physical Vulnerabilities
+#  - Aquifer Lithology
+#  - A-Horizon Organic Carbon
+#  - C-Horizon Aluminum
+#  - C-Horizon Amorphous Content
+#  - C-Horizon Calcium
+#  - C-Horizon Phosphorus
+#  - C-Horizon Clay Fraction
+#  - C-Horizon Iron
+#  - C-Horizon Organic Carbon
+#  - Population Density
+#  - Nitrogen from Septic
+#  - Lithology
+#  - Percent Tile Drainage
+#  - Agricultural Land Use (500m buffer)
+#  - Natural Land Use (500m buffer)
+#  - Percent Croplands
+#  - Percent of Developed Land
+#  - Percent Emergent Herbaceous Wetlands
+#  - Percent Land Cover Designated as Forest
+#  - Percent Pasture
+#  - Average Width of Stream Buffers Downstream from Agriculture
+#  - Elevation
+#  - Slope
+#  - Stream Density
+#  - Bulk Density
+#  - Organic Matter
+#  - Available Water Holding Capacity
+#  - Available Water Holding Capacity (0–25 cm)
+#  - Cation Exchange Capacity
+#  - Drainage Class
+#  - Electroconductivity
+#  - pH
+#  - Sodium Absorption Ratio
+#  - Soil Depth
+#  - Percent Clay (0–5 cm)
+#  - Percent Sand (0–5 cm)
+#  - Percent Silt (0–5 cm)
+#  - Base Flow Index
+#  - Depth to Bedrock
+#  - Depth to Water Table
+#  - Recharge
+#  - Transmissivity
+#  - Unsaturated Zone Travel Time
+#  - Unsaturated Zone Water Content
+#  - Evapotranspiration
+#  - Quickflow
+#  - Average Annual Precipitation
+#  - Well Depth
+#
+# PFAS Sources
+#  - Known federal PFAS site
+#  - Suspected federal PFAS site
+#  - Superfund site
+#  - National Priorities List site
+#  - PFAS spill site
+#  - Part 139 airport
+#  - Treatment plant
+#  - Onsite wastewater system
+#  - NAICS
+#
+# PFAS Summary Predictors Carried In From Input
+#  - result_most_recent_*
+#  - DL_most_recent_*
+#  - ever_detected_*
+#
+# Notes:
+#   - Spatial distance calculations use NAD83 / CONUS Albers (EPSG:5070).
+#   - Source-distance predictors are expressed in meters.
+#   - Source-distance predictors are capped at 50,000 meters.
+#
+# Author: Kyndra Shea
+# Last updated: 2026-11-12
+# --------------------------------------------------------
+
+### LOAD PACKAGES ###
+
+library(dplyr)
+library(foreign)
+library(gstat)
+library(here)
+library(janitor)
+library(purrr)
+library(readr)
+library(readxl)
+library(sf)
+library(stringr)
+library(terra)
+library(tibble)
+library(tidyr)
+library(tigris)
+
+### SPATIAL MODELING STANDARDS ###
+
+target_crs <- 5070L
+idp_default <- 2
+nmax_default <- 12
+distance_cap <- 50000
+
+options(tigris_use_cache = TRUE)
+
+### PATHS ###
+
+wells_csv_path <- here(
+  "data", "05_UCMR_WQP_PFAS_combined", "UCMR_WQP_PFAS_combined.csv"
+)
+
+huc12_path <- here(
+  "data", "01_sample_data", "WBD_National_GPKG", "WBD_National_GPKG.gpkg"
+)
+mukey_rast_path <- here(
+  "data", "01_sample_data", "MUKEY_90m", "MapunitRasterCONUS90m1.tif"
+)
+
+aquifer_path <- here(
+  "data", "01_sample_data", "aquifers", "usa_aquifers.shp"
+)
+a_horizon_path <- here(
+  "data", "01_sample_data", "SoilGeochemistry",
+  "Appendix3a_AHorizon_18Sept2013.xlsx"
+)
+c_horizon_path <- here(
+  "data", "01_sample_data", "SoilGeochemistry",
+  "Appendix4a_CHorizon_18Sept2013.xlsx"
+)
+popdens_path <- here(
+  "data", "01_sample_data", "pden2010block", "pden2010_60m.tif"
+)
+nsep_path <- here(
+  "data", "01_sample_data", "SepN_CONUS_bg2010", "SepN_CONUS_bg2010.shp"
+)
+lith_path <- here(
+  "data", "01_sample_data", "geolpoly", "geolpoly.shp"
+)
+rocktypes_path <- here(
+  "data", "01_sample_data", "geolpoly_rocktypes", "geolpoly_rocktypes.dbf"
+)
+tile_drainage_path <- here(
+  "data", "01_sample_data", "AgTile-US-TIFF", "AgTile-US.tif"
+)
+landuse_path <- here("data", "01_sample_data", "lu2012_050815")
+landcover_path <- here("data", "01_sample_data", "LandCoverCONUS.csv")
+streambuffer_path <- here("data", "01_sample_data", "AgBuffers.csv")
+elev_path <- here("data", "01_sample_data", "ElevationUS.tif")
+slope_path <- here("data", "01_sample_data", "hlrshape", "hlrus.shp")
+streamdensity_path <- here("data", "01_sample_data", "stmdenhuc12")
+layer_dbf_path <- here("data", "01_sample_data", "Layer.dbf")
+walkinshaw_dir <- here("data", "01_sample_data", "Walkinshaw, 2020")
+clay_path <- here("data", "01_sample_data", "clay05.tif")
+sand_path <- here("data", "01_sample_data", "sand05.tif")
+silt_path <- here("data", "01_sample_data", "silt05.tif")
+bfi_path <- here("data", "01_sample_data", "bfi48grd")
+bedrock_path <- here("data", "01_sample_data", "BDTICM_M_250m_ll.tif")
+dtw_path <- here(
+  "data", "01_sample_data", "Output_CONUS_trans",
+  "dtw_conus_MF6_SS_Unconfined_250", "dtw.tif"
+)
+recharge_path <- here("data", "01_sample_data", "rech48grd")
+trans_path <- here(
+  "data", "01_sample_data", "Output_CONUS_trans",
+  "dtw_conus_MF6_SS_Unconfined_250", "trans.tif"
+)
+unsattt_path <- here(
+  "data", "01_sample_data", "Output_CONUS_unsat",
+  "traveltime_conus_MF6_SS_Unconfined_250", "tt_total.tif"
+)
+unsatwc_path <- here(
+  "data", "01_sample_data", "Output_CONUS_unsat",
+  "watercontent_conus_MF6_SS_Unconfined_250", "wc_avg.tif"
+)
+et_path <- here("data", "01_sample_data", "0013ET", "0013.tif")
+quickflow_path <- here(
+  "data", "01_sample_data", "QuickFlow0013", "RO0013.tif"
+)
+precip_path <- here(
+  "data", "01_sample_data", "prism", "ppt_us_30s_2020_avg30y",
+  "prism_ppt_us_30s_2020_avg30y.tif"
+)
+welldepth_bottom_path <- here(
+  "data", "01_sample_data", "domestic_grids", "domestic_bottom_open.asc"
+)
+
+cwns_path <- here(
+  "data", "01_sample_data", "CWNS Data 2022", "CWNS_NATIONAL_APR2024"
+)
+federal_path <- here(
+  "data", "01_sample_data", "source", "Federal Sites PFAS Analytic.xlsx"
+)
+superfund_pfas_path <- here(
+  "data", "01_sample_data", "source", "Superfund PFAS Analytic.xlsx"
+)
+spills_path <- here(
+  "data", "01_sample_data", "source", "Spills Data PFAS Analytic.xlsx"
+)
+superfund_npl_path <- here(
+  "data", "01_sample_data", "source", "Superfund",
+  "Superfund National Priorities List NPL Sites with Status Information.shp"
+)
+part139_path <- here(
+  "data", "01_sample_data", "source", "NTAD", "AviationFacilities",
+  "6916451147882473169_Aviation_Facilities.shp"
+)
+frs_facility_path <- here(
+  "data", "01_sample_data", "national_combined", "NATIONAL_FACILITY_FILE.CSV"
+)
+frs_naics_path <- here(
+  "data", "01_sample_data", "national_combined", "NATIONAL_NAICS_FILE.CSV"
+)
+
+output_gpkg <- here(
+  "data", "output", "wells_covars_physical_source_updated.gpkg"
+)
+
+### HELPER FUNCTIONS ###
+
+clean_location_id <- function(x) {
+  x <- trimws(as.character(x))
+  x[x == ""] <- NA_character_
+  x
+}
+
+impute_median <- function(x) {
+  median_value <- stats::median(x, na.rm = TRUE)
+
+  if (is.na(median_value)) {
+    warning("Cannot median-impute an all-missing variable.")
+    return(x)
+  }
+
+  dplyr::if_else(is.na(x), median_value, x)
+}
+
+get_mode <- function(x) {
+  x_nonmissing <- x[!is.na(x)]
+
+  if (length(x_nonmissing) == 0) {
+    return(NA)
+  }
+
+  names(sort(table(x_nonmissing), decreasing = TRUE))[1]
+}
+
+impute_mode <- function(x) {
+  mode_value <- get_mode(x)
+
+  if (is.na(mode_value)) {
+    warning("Cannot mode-impute an all-missing variable.")
+    return(x)
+  }
+
+  dplyr::if_else(is.na(x), mode_value, x)
+}
+
+nd_to_zero_num <- function(x) {
+  x <- trimws(as.character(x))
+  x[x == "N.D."] <- "0"
+  suppressWarnings(as.numeric(x))
+}
+
+extract_raster_values <- function(wells, raster_path, method = "simple") {
+  raster_layer <- terra::rast(raster_path)
+
+  wells_raster_crs <- sf::st_transform(
+    wells,
+    terra::crs(raster_layer)
+  )
+
+  extracted <- terra::extract(
+    raster_layer,
+    terra::vect(wells_raster_crs),
+    method = method
+  )
+
+  extracted[[2]]
+}
+
+read_sf_points <- function(file,
+                           lat_col = "Latitude",
+                           lon_col = "Longitude") {
+  readxl::read_excel(file) %>%
+    dplyr::mutate(
+      latitude = suppressWarnings(as.numeric(.data[[lat_col]])),
+      longitude = suppressWarnings(as.numeric(.data[[lon_col]]))
+    ) %>%
+    dplyr::filter(
+      !is.na(.data$latitude),
+      !is.na(.data$longitude),
+      dplyr::between(.data$latitude, -90, 90),
+      dplyr::between(.data$longitude, -180, 180)
+    ) %>%
+    sf::st_as_sf(
+      coords = c("longitude", "latitude"),
+      crs = 4326,
+      remove = FALSE
+    ) %>%
+    sf::st_transform(target_crs)
+}
+
+compute_distance <- function(wells, sources) {
+  sources <- sources %>%
+    sf::st_transform(target_crs) %>%
+    dplyr::filter(!sf::st_is_empty(.data$geometry))
+
+  if (nrow(sources) == 0) {
+    warning("No valid source locations available for a distance calculation.")
+    return(rep(NA_real_, nrow(wells)))
+  }
+
+  wells_m <- sf::st_transform(wells, target_crs)
+
+  nearest_index <- sf::st_nearest_feature(wells_m, sources)
+
+  as.numeric(
+    sf::st_distance(
+      wells_m,
+      sources[nearest_index, ],
+      by_element = TRUE
+    )
+  )
+}
+
+idw_at_wells <- function(chem_name, points_sp, wells_sp) {
+  points_clean <- points_sp[!is.na(points_sp[[chem_name]]), ]
+
+  if (nrow(points_clean) == 0) {
+    warning("No non-missing observations available for: ", chem_name)
+    return(rep(NA_real_, nrow(wells_sp)))
+  }
+
+  prediction <- gstat::idw(
+    formula = stats::as.formula(paste0(chem_name, " ~ 1")),
+    locations = points_clean,
+    newdata = wells_sp,
+    idp = idp_default,
+    nmax = min(nmax_default, nrow(points_clean))
+  )
+
+  prediction$var1.pred
+}
+
+### READ WELL LOCATIONS ###
+
+# Combined UCMR 5 + WQP PFAS data (03_combine_UCMR_WQP.R);
+# long format (one row per site x compound), so keep one row per site
+
+wells_raw <- readr::read_csv(
+  wells_csv_path,
+  col_select = c(PWSID_or_MonitoringLocationIdentifier, lon, lat),
+  show_col_types = FALSE
+)
+
+wells_locations <- wells_raw %>%
+  dplyr::transmute(
+    MonitoringLocationIdentifier = clean_location_id(
+      .data$PWSID_or_MonitoringLocationIdentifier
+    ),
+    lon = as.numeric(.data$lon),
+    lat = as.numeric(.data$lat)
+  ) %>%
+  dplyr::filter(
+    !is.na(.data$MonitoringLocationIdentifier),
+    !is.na(.data$lon),
+    !is.na(.data$lat)
+  ) %>%
+  dplyr::distinct(MonitoringLocationIdentifier, .keep_all = TRUE) %>%
+  sf::st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE)
+
+### RESTRICT TO CONTIGUOUS UNITED STATES ###
+
+conus_states <- tigris::states(
+  cb = TRUE,
+  year = 2020,
+  class = "sf"
+) %>%
+  dplyr::filter(
+    !.data$STUSPS %in% c("AK", "HI", "PR", "GU", "VI", "MP", "AS")
+  )
+
+conus_boundary <- sf::st_union(conus_states) %>%
+  sf::st_transform(sf::st_crs(wells_locations))
+
+inside_conus <- lengths(
+  sf::st_within(wells_locations, conus_boundary)
+) > 0
+
+wells_covars <- wells_locations[inside_conus, ]
+
+message(
+  "Final CONUS well-location dataset: ",
+  format(nrow(wells_covars), big.mark = ","),
+  " unique locations."
+)
+
+### HUC12 ###
+
+huc12_sf <- sf::st_read(
+  huc12_path,
+  layer = "WBDHU12",
+  quiet = TRUE
+) %>%
+  dplyr::rename(HUC12 = .data$huc12) %>%
+  dplyr::mutate(
+    HUC12 = stringr::str_pad(
+      as.character(.data$HUC12),
+      width = 12,
+      pad = "0"
+    )
+  ) %>%
+  sf::st_transform(target_crs)
+
+wells_5070 <- sf::st_transform(
+  wells_covars,
+  target_crs
+)
+
+huc12_join <- sf::st_join(
+  wells_5070,
+  huc12_sf %>% dplyr::select(HUC12),
+  left = TRUE,
+  join = sf::st_within
+)
+
+huc12_tbl <- huc12_join %>%
+  sf::st_drop_geometry() %>%
+  dplyr::select(
+    MonitoringLocationIdentifier,
+    HUC12
+  ) %>%
+  dplyr::distinct()
+
+wells_covars <- wells_covars %>%
+  dplyr::left_join(
+    huc12_tbl,
+    by = "MonitoringLocationIdentifier"
+  )
+
+### MUKEY ###
+
+mukey_rast <- terra::rast(mukey_rast_path)
+
+wells_mukey_crs <- sf::st_transform(
+  wells_covars,
+  terra::crs(mukey_rast)
+)
+
+mukey_extract <- terra::extract(
+  mukey_rast,
+  terra::vect(wells_mukey_crs),
+  method = "near"
+)
+
+wells_covars$mukey <- as.character(mukey_extract[[2]])
+
+### AQUIFER LITHOLOGY ###
+
+aquifers_sf <- sf::st_read(
+  aquifer_path,
+  quiet = TRUE
+) %>%
+  sf::st_transform(target_crs) %>%
+  sf::st_buffer(dist = 1000)
+
+wells_5070 <- sf::st_transform(
+  wells_covars,
+  target_crs
+)
+
+aquifer_join <- sf::st_join(
+  wells_5070,
+  aquifers_sf %>% dplyr::select(ROCKTYPE),
+  left = TRUE,
+  largest = TRUE
+)
+
+aquifer_tbl <- aquifer_join %>%
+  sf::st_drop_geometry() %>%
+  dplyr::select(
+    MonitoringLocationIdentifier,
+    ROCKTYPE
+  ) %>%
+  dplyr::distinct()
+
+wells_covars <- wells_covars %>%
+  dplyr::left_join(
+    aquifer_tbl,
+    by = "MonitoringLocationIdentifier"
+  ) %>%
+  dplyr::rename(
+    aquifer_lithology = ROCKTYPE
+  )
+
+### SOIL GEOCHEMISTRY ###
+
+a_horizon_raw <- readxl::read_excel(
+  a_horizon_path,
+  sheet = "AHorizon",
+  skip = 12
+) %>%
+  janitor::clean_names()
+
+c_horizon_raw <- readxl::read_excel(
+  c_horizon_path,
+  sheet = "CHorizon",
+  skip = 12
+) %>%
+  janitor::clean_names()
+
+chem_vars_a <- c("acorg")
+
+chem_vars_c <- c(
+  "cal",
+  "camorph",
+  "ccorg",
+  "cca",
+  "cfe",
+  "ccalcite",
+  "ck",
+  "cp",
+  "ctotclay"
+)
+
+a_horizon <- a_horizon_raw %>%
+  dplyr::mutate(
+    longitude = suppressWarnings(as.numeric(.data$longitude)),
+    latitude = suppressWarnings(as.numeric(.data$latitude))
+  ) %>%
+  dplyr::filter(
+    !is.na(.data$longitude),
+    !is.na(.data$latitude)
+  ) %>%
+  dplyr::mutate(
+    dplyr::across(
+      dplyr::all_of(chem_vars_a),
+      nd_to_zero_num
+    )
+  )
+
+c_horizon <- c_horizon_raw %>%
+  dplyr::mutate(
+    longitude = suppressWarnings(as.numeric(.data$longitude)),
+    latitude = suppressWarnings(as.numeric(.data$latitude))
+  ) %>%
+  dplyr::filter(
+    !is.na(.data$longitude),
+    !is.na(.data$latitude)
+  ) %>%
+  dplyr::mutate(
+    dplyr::across(
+      dplyr::all_of(chem_vars_c),
+      nd_to_zero_num
+    )
+  )
+
+a_sf <- sf::st_as_sf(
+  a_horizon,
+  coords = c("longitude", "latitude"),
+  crs = 4326,
+  remove = FALSE
+) %>%
+  sf::st_transform(target_crs)
+
+c_sf <- sf::st_as_sf(
+  c_horizon,
+  coords = c("longitude", "latitude"),
+  crs = 4326,
+  remove = FALSE
+) %>%
+  sf::st_transform(target_crs)
+
+wells_5070 <- sf::st_transform(
+  wells_covars,
+  target_crs
+)
+
+a_sp <- as(a_sf, "Spatial")
+c_sp <- as(c_sf, "Spatial")
+wells_sp <- as(wells_5070, "Spatial")
+
+a_predictions <- lapply(
+  chem_vars_a,
+  idw_at_wells,
+  points_sp = a_sp,
+  wells_sp = wells_sp
+)
+
+c_predictions <- lapply(
+  chem_vars_c,
+  idw_at_wells,
+  points_sp = c_sp,
+  wells_sp = wells_sp
+)
+
+# Rename to match the covariate table
+chem_names <- c(
+  acorg = "a_c_org",
+  cal = "c_al",
+  camorph = "c_amorph",
+  ccorg = "c_c_org",
+  cca = "c_ca",
+  cfe = "c_fe",
+  ccalcite = "c_calcite",
+  ck = "c_k",
+  cp = "c_p",
+  ctotclay = "c_tot_clay"
+)
+
+names(a_predictions) <- chem_names[chem_vars_a]
+names(c_predictions) <- chem_names[chem_vars_c]
+
+soil_geochem_tbl <- dplyr::bind_cols(
+  tibble::as_tibble(a_predictions),
+  tibble::as_tibble(c_predictions)
+)
+
+wells_covars <- dplyr::bind_cols(
+  wells_covars,
+  soil_geochem_tbl
+)
+
+### POPULATION DENSITY ###
+
+wells_covars$pop_dens <- extract_raster_values(
+  wells_covars,
+  popdens_path
+)
+
+wells_covars$pop_dens <- impute_median(
+  wells_covars$pop_dens
+)
+
+### ESTIMATED SEPTIC NITROGEN ###
+
+nsep_sf <- sf::st_read(
+  nsep_path,
+  quiet = TRUE
+) %>%
+  dplyr::mutate(
+    area_km2 = as.numeric(.data$ALAND10) / 1e6,
+    n_sep_km2 = as.numeric(.data$NSEP2010) / .data$area_km2
+  ) %>%
+  sf::st_transform(target_crs)
+
+wells_5070 <- sf::st_transform(
+  wells_covars,
+  target_crs
+)
+
+nsep_join <- sf::st_join(
+  wells_5070,
+  nsep_sf %>% dplyr::select(n_sep_km2),
+  left = TRUE,
+  join = sf::st_intersects
+)
+
+wells_covars$n_sep_km2 <- sf::st_drop_geometry(
+  nsep_join
+)$n_sep_km2
+
+wells_covars$n_sep_km2 <- impute_median(
+  wells_covars$n_sep_km2
+)
+
+### LITHOLOGY ###
+
+lith_sf <- sf::st_read(
+  lith_path,
+  quiet = TRUE
+) %>%
+  dplyr::select(
+    UNIT_LINK = .data$UNIT_LINK
+  )
+
+rocktypes_tbl <- foreign::read.dbf(
+  rocktypes_path,
+  as.is = TRUE
+) %>%
+  tibble::as_tibble()
+
+names(rocktypes_tbl) <- toupper(names(rocktypes_tbl))
+
+rocktypes_clean <- rocktypes_tbl %>%
+  dplyr::transmute(
+    UNIT_LINK = as.character(.data$UNIT_LINK),
+    lith = as.character(.data$ROCKTYPE)
+  ) %>%
+  dplyr::filter(
+    !is.na(.data$UNIT_LINK)
+  ) %>%
+  dplyr::distinct(
+    .data$UNIT_LINK,
+    .keep_all = TRUE
+  )
+
+lith_sf <- lith_sf %>%
+  dplyr::mutate(
+    UNIT_LINK = as.character(.data$UNIT_LINK)
+  ) %>%
+  dplyr::left_join(
+    rocktypes_clean,
+    by = "UNIT_LINK"
+  ) %>%
+  sf::st_transform(target_crs)
+
+wells_5070 <- sf::st_transform(
+  wells_covars,
+  target_crs
+)
+
+lith_join <- sf::st_join(
+  wells_5070,
+  lith_sf %>% dplyr::select(lith),
+  left = TRUE,
+  join = sf::st_intersects,
+  largest = TRUE
+)
+
+lith_tbl <- lith_join %>%
+  sf::st_drop_geometry() %>%
+  dplyr::select(
+    MonitoringLocationIdentifier,
+    lith
+  ) %>%
+  dplyr::distinct()
+
+wells_covars <- wells_covars %>%
+  dplyr::left_join(
+    lith_tbl,
+    by = "MonitoringLocationIdentifier"
+  )
+
+wells_covars$lith <- impute_mode(
+  wells_covars$lith
+)
+
+### TILE DRAINAGE ###
+
+tile_drainage <- terra::rast(tile_drainage_path)
+
+wells_tile_crs <- sf::st_transform(
+  wells_covars,
+  terra::crs(tile_drainage)
+)
+
+tile_extract <- terra::extract(
+  tile_drainage,
+  terra::vect(wells_tile_crs)
+)
+
+wells_covars$tile_drainage <- 100 * tile_extract[[2]]
+
+wells_covars$tile_drainage <- impute_median(
+  wells_covars$tile_drainage
+)
+
+### AGRICULTURAL AND NATURAL LAND USE ###
+
+landuse_rast <- terra::rast(landuse_path)
+
+ag_codes <- c(43, 44, 45)
+
+wells_landuse_crs <- sf::st_transform(
+  wells_covars,
+  terra::crs(landuse_rast)
+)
+
+wells_landuse_vect <- terra::vect(wells_landuse_crs)
+
+wells_landuse_buffer <- terra::buffer(
+  wells_landuse_vect,
+  width = 500
+)
+
+landuse_extract <- terra::extract(
+  landuse_rast,
+  wells_landuse_buffer
+)
+
+landuse_name <- names(landuse_rast)[1]
+
+landuse_tbl <- landuse_extract %>%
+  tibble::as_tibble() %>%
+  dplyr::transmute(
+    rowid = as.integer(.data$ID),
+    landclass = as.integer(.data[[landuse_name]])
+  ) %>%
+  dplyr::filter(!is.na(.data$landclass)) %>%
+  dplyr::mutate(
+    landgroup = dplyr::case_when(
+      .data$landclass %in% ag_codes ~ "ag_land_use",
+      TRUE ~ "nat_land_use"
+    )
+  ) %>%
+  dplyr::count(
+    .data$rowid,
+    .data$landgroup,
+    name = "n_cells"
+  ) %>%
+  dplyr::group_by(.data$rowid) %>%
+  dplyr::mutate(
+    percent = 100 * .data$n_cells / sum(.data$n_cells)
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(
+    .data$rowid,
+    .data$landgroup,
+    .data$percent
+  ) %>%
+  tidyr::pivot_wider(
+    names_from = .data$landgroup,
+    values_from = .data$percent,
+    values_fill = 0
+  )
+
+wells_covars <- wells_covars %>%
+  dplyr::mutate(
+    rowid = dplyr::row_number()
+  ) %>%
+  dplyr::left_join(
+    landuse_tbl,
+    by = "rowid"
+  ) %>%
+  dplyr::select(-rowid) %>%
+  dplyr::mutate(
+    ag_land_use = dplyr::coalesce(.data$ag_land_use, 0),
+    nat_land_use = dplyr::coalesce(
+      .data$nat_land_use,
+      0
+    )
+  )
+
+landuse_total <- wells_covars$ag_land_use +
+  wells_covars$nat_land_use
+
+wells_covars$ag_land_use <- dplyr::if_else(
+  landuse_total > 0,
+  100 * wells_covars$ag_land_use / landuse_total,
+  0
+)
+
+wells_covars$nat_land_use <- dplyr::if_else(
+  landuse_total > 0,
+  100 * wells_covars$nat_land_use / landuse_total,
+  0
+)
+
+### LAND COVER BY HUC12 ###
+
+landcover_tbl <- readr::read_csv(
+  landcover_path,
+  show_col_types = FALSE
+) %>%
+  dplyr::transmute(
+    HUC12 = stringr::str_pad(
+      as.character(.data$HUC12),
+      width = 12,
+      pad = "0"
+    ),
+    p_cropland = suppressWarnings(as.numeric(.data$PAGC)),
+    p_devland = suppressWarnings(as.numeric(.data$PDEV)),
+    p_hwetlands = suppressWarnings(as.numeric(.data$PWETL95)),
+    p_forest = suppressWarnings(as.numeric(.data$PFOR)),
+    p_pasture = suppressWarnings(as.numeric(.data$PAGP))
+  )
+
+landcover_vars <- c(
+  "p_cropland",
+  "p_devland",
+  "p_hwetlands",
+  "p_forest",
+  "p_pasture"
+)
+
+wells_covars <- wells_covars %>%
+  dplyr::left_join(
+    landcover_tbl,
+    by = "HUC12"
+  ) %>%
+  dplyr::mutate(
+    dplyr::across(
+      dplyr::all_of(landcover_vars),
+      impute_median
+    )
+  )
+
+### AVERAGE STREAM BUFFER WIDTH ###
+
+streambuffer_tbl <- readr::read_csv(
+  streambuffer_path,
+  show_col_types = FALSE
+) %>%
+  dplyr::transmute(
+    HUC12 = stringr::str_pad(
+      as.character(.data$HUC12),
+      width = 12,
+      pad = "0"
+    ),
+    avg_stream_buff_width = suppressWarnings(
+      as.numeric(.data$AvgBuffWidth)
+    )
+  )
+
+wells_covars <- wells_covars %>%
+  dplyr::left_join(
+    streambuffer_tbl,
+    by = "HUC12"
+  )
+
+wells_covars$avg_stream_buff_width <- impute_median(
+  wells_covars$avg_stream_buff_width
+)
+
+### ELEVATION ###
+
+wells_covars$elev <- extract_raster_values(
+  wells_covars,
+  elev_path
+)
+
+wells_covars$elev <- impute_median(
+  wells_covars$elev
+)
+
+### SLOPE ###
+
+slope_sf <- sf::st_read(
+  slope_path,
+  quiet = TRUE
+) %>%
+  sf::st_transform(sf::st_crs(wells_covars))
+
+slope_join <- sf::st_join(
+  wells_covars,
+  slope_sf %>% dplyr::select(
+    slope = .data$SLOPE
+  ),
+  left = TRUE
+)
+
+wells_covars$slope <- sf::st_drop_geometry(
+  slope_join
+)$slope
+
+wells_covars$slope <- impute_median(
+  wells_covars$slope
+)
+
+### STREAM DENSITY ###
+
+wells_covars$stm_den <- extract_raster_values(
+  wells_covars,
+  streamdensity_path
+)
+
+wells_covars$stm_den <- impute_median(
+  wells_covars$stm_den
+)
+
+### BULK DENSITY AND ORGANIC MATTER ###
+
+layer_tbl <- foreign::read.dbf(
+  layer_dbf_path,
+  as.is = TRUE
+) %>%
+  tibble::as_tibble()
+
+names(layer_tbl) <- tolower(names(layer_tbl))
+
+soil_attributes <- layer_tbl %>%
+  dplyr::transmute(
+    mukey = as.character(.data$mukey),
+    bulk_density = suppressWarnings(as.numeric(.data$avgbd)),
+    organic_matter = suppressWarnings(as.numeric(.data$avgom))
+  ) %>%
+  dplyr::mutate(
+    bulk_density = dplyr::na_if(.data$bulk_density, -9999),
+    organic_matter = dplyr::na_if(.data$organic_matter, -9999)
+  )
+
+wells_covars <- wells_covars %>%
+  dplyr::left_join(
+    soil_attributes,
+    by = "mukey"
+  ) %>%
+  dplyr::mutate(
+    bulk_density = impute_median(.data$bulk_density),
+    organic_matter = impute_median(.data$organic_matter)
+  )
+
+### WALKINSHAW SOIL RASTERS ###
+
+soil_paths <- c(
+  awc = file.path(walkinshaw_dir, "waterstorage.tif"),
+  awc25 = file.path(walkinshaw_dir, "paws025.tif"),
+  cec = file.path(walkinshaw_dir, "cec.tif"),
+  drainage_class_int = file.path(
+    walkinshaw_dir,
+    "drainageclassint.tif"
+  ),
+  ec = file.path(walkinshaw_dir, "ec.tif"),
+  pH = file.path(walkinshaw_dir, "ph.tif"),
+  sar = file.path(walkinshaw_dir, "sar.tif"),
+  soil_depth = file.path(walkinshaw_dir, "soildepth.tif")
+)
+
+soil_rasters <- terra::rast(
+  unname(soil_paths)
+)
+
+names(soil_rasters) <- names(soil_paths)
+
+wells_soil_crs <- sf::st_transform(
+  wells_covars,
+  terra::crs(soil_rasters)
+)
+
+soil_extract <- terra::extract(
+  soil_rasters,
+  terra::vect(wells_soil_crs)
+)
+
+wells_covars <- wells_covars %>%
+  dplyr::mutate(
+    awc = soil_extract$awc,
+    awc25 = soil_extract$awc25,
+    cec = soil_extract$cec,
+    drainage_class_int = as.integer(
+      round(soil_extract$drainage_class_int)
+    ),
+    ec = soil_extract$ec,
+    pH = soil_extract$pH,
+    sar = soil_extract$sar,
+    soil_depth = soil_extract$soil_depth
+  ) %>%
+  dplyr::mutate(
+    dplyr::across(
+      c(awc, awc25, cec, ec, pH, sar, soil_depth),
+      impute_median
+    ),
+    drainage_class_int = impute_mode(
+      .data$drainage_class_int
+    )
+  )
+
+### PERCENT CLAY, SAND, AND SILT ###
+
+soil_fraction_paths <- c(
+  p_clay = clay_path,
+  p_sand = sand_path,
+  p_silt = silt_path
+)
+
+soil_fraction_rasters <- terra::rast(
+  unname(soil_fraction_paths)
+)
+
+names(soil_fraction_rasters) <- names(soil_fraction_paths)
+
+wells_fraction_crs <- sf::st_transform(
+  wells_covars,
+  terra::crs(soil_fraction_rasters)
+)
+
+soil_fraction_extract <- terra::extract(
+  soil_fraction_rasters,
+  terra::vect(wells_fraction_crs)
+)
+
+wells_covars <- wells_covars %>%
+  dplyr::mutate(
+    p_clay = soil_fraction_extract$p_clay,
+    p_sand = soil_fraction_extract$p_sand,
+    p_silt = soil_fraction_extract$p_silt
+  ) %>%
+  dplyr::mutate(
+    dplyr::across(
+      c(p_clay, p_sand, p_silt),
+      impute_median
+    )
+  )
+
+### HYDROCLIMATE AND GROUNDWATER ###
+
+hydro_raster_paths <- c(
+  bfi = bfi_path,
+  bedrock_depth = bedrock_path,
+  dtw = dtw_path,
+  recharge = recharge_path,
+  trans = trans_path,
+  unsat_tt = unsattt_path,
+  unsat_wc = unsatwc_path,
+  et = et_path,
+  quickflow = quickflow_path,
+  precip = precip_path
+)
+
+for (variable_name in names(hydro_raster_paths)) {
+  wells_covars[[variable_name]] <- extract_raster_values(
+    wells_covars,
+    hydro_raster_paths[[variable_name]]
+  )
+
+  wells_covars[[variable_name]] <- impute_median(
+    wells_covars[[variable_name]]
+  )
+}
+
+### WELL DEPTH ###
+
+wells_covars$well_depth <- extract_raster_values(
+  wells_covars,
+  welldepth_bottom_path
+)
+
+wells_covars$well_depth <- impute_median(
+  wells_covars$well_depth
+)
+
+### SOURCE DISTANCE PREDICTORS ###
+
+cwns_files <- list.files(
+  cwns_path,
+  pattern = "\\.csv$",
+  full.names = TRUE
+)
+
+cwns_tables <- cwns_files %>%
+  stats::setNames(
+    basename(.) %>%
+      stringr::str_remove("\\.csv$")
+  ) %>%
+  purrr::map(
+    readr::read_csv,
+    show_col_types = FALSE
+  )
+
+treatment_sf <- cwns_tables$FACILITIES %>%
+  dplyr::filter(
+    .data$INFRASTRUCTURETYPE == "Wastewater"
+  ) %>%
+  dplyr::left_join(
+    cwns_tables$FACILITYTYPES,
+    by = "CWNSID"
+  ) %>%
+  dplyr::filter(
+    .data$FACILITYTYPE == "Treatment Plant"
+  ) %>%
+  dplyr::left_join(
+    cwns_tables$PHYSICALLOCATION,
+    by = "CWNSID"
+  ) %>%
+  dplyr::distinct(
+    .data$CWNSID,
+    .keep_all = TRUE
+  ) %>%
+  dplyr::filter(
+    !is.na(.data$LATITUDE),
+    !is.na(.data$LONGITUDE)
+  ) %>%
+  sf::st_as_sf(
+    coords = c("LONGITUDE", "LATITUDE"),
+    crs = 4326,
+    remove = FALSE
+  ) %>%
+  sf::st_transform(target_crs)
+
+onsite_sf <- cwns_tables$FACILITIES %>%
+  dplyr::filter(
+    .data$INFRASTRUCTURETYPE ==
+      "Decentralized Wastewater Treatment"
+  ) %>%
+  dplyr::left_join(
+    cwns_tables$FACILITYTYPES,
+    by = "CWNSID"
+  ) %>%
+  dplyr::filter(
+    .data$FACILITYTYPE ==
+      "Onsite Wastewater Treatment System"
+  ) %>%
+  dplyr::left_join(
+    cwns_tables$PHYSICALLOCATION,
+    by = "CWNSID"
+  ) %>%
+  dplyr::distinct(
+    .data$CWNSID,
+    .keep_all = TRUE
+  ) %>%
+  dplyr::filter(
+    !is.na(.data$LATITUDE),
+    !is.na(.data$LONGITUDE)
+  ) %>%
+  sf::st_as_sf(
+    coords = c("LONGITUDE", "LATITUDE"),
+    crs = 4326,
+    remove = FALSE
+  ) %>%
+  sf::st_transform(target_crs)
+
+federal_sf <- read_sf_points(federal_path)
+
+superfund_pfas_sf <- read_sf_points(superfund_pfas_path)
+
+spills_sf <- read_sf_points(spills_path)
+
+superfund_npl_sf <- sf::st_read(
+  superfund_npl_path,
+  quiet = TRUE
+) %>%
+  dplyr::filter(
+    !sf::st_is_empty(.data$geometry)
+  ) %>%
+  sf::st_transform(target_crs)
+
+part139_sf <- sf::st_read(
+  part139_path,
+  quiet = TRUE
+) %>%
+  dplyr::filter(
+    !is.na(.data$FAR139TY),
+    !sf::st_is_empty(.data$geometry)
+  ) %>%
+  sf::st_transform(target_crs)
+
+federal_known_sf <- federal_sf %>%
+  dplyr::filter(
+    .data$`PFAS Presence` == "Known Detection"
+  )
+
+federal_suspected_sf <- federal_sf %>%
+  dplyr::filter(
+    .data$`PFAS Presence` == "Suspected"
+  )
+
+wells_covars$dist_fed_known <- compute_distance(
+  wells_covars,
+  federal_known_sf
+)
+
+wells_covars$dist_fed_suspected <- compute_distance(
+  wells_covars,
+  federal_suspected_sf
+)
+
+wells_covars$dist_superfund_pfas <- compute_distance(
+  wells_covars,
+  superfund_pfas_sf
+)
+
+wells_covars$dist_superfund_npl <- compute_distance(
+  wells_covars,
+  superfund_npl_sf
+)
+
+wells_covars$dist_spills <- compute_distance(
+  wells_covars,
+  spills_sf
+)
+
+wells_covars$dist_part139_airports <- compute_distance(
+  wells_covars,
+  part139_sf
+)
+
+wells_covars$dist_treatment_plants <- compute_distance(
+  wells_covars,
+  treatment_sf
+)
+
+wells_covars$dist_onsite_systems <- compute_distance(
+  wells_covars,
+  onsite_sf
+)
+
+### COLLAPSED NAICS DISTANCE ###
+
+naics_for_distance <- c(
+  212221, 212291, 212299, 212393,
+  313210, 313230, 313320,
+  314110, 314999,
+  316110,
+  322121, 322130, 323111,
+  324110, 324191,
+  325120, 325193, 325199, 325211, 325212,
+  325510, 325611, 325612, 325613, 325998,
+  326112, 326113, 326121, 326130, 326211,
+  327215, 327310,
+  332812, 332813, 332999,
+  334220, 334310, 334412, 334413, 334418,
+  334419, 334512,
+  335911, 335912, 335931, 335999,
+  424690, 442291,
+  488119,
+  561740,
+  562112, 562211, 562212, 562213, 562219,
+  811420,
+  928110
+)
+
+frs_facilities <- readr::read_csv(
+  frs_facility_path,
+  col_types = readr::cols(
+    TRIBALLANDCODE = readr::col_character()
+  ),
+  show_col_types = FALSE
+)
+
+frs_naics <- readr::read_csv(
+  frs_naics_path,
+  show_col_types = FALSE
+)
+
+naics_collapsed_sf <- frs_facilities %>%
+  dplyr::left_join(
+    frs_naics,
+    by = "REGISTRYID"
+  ) %>%
+  dplyr::mutate(
+    NAICSCODE = as.character(.data$NAICSCODE),
+    LATITUDE83 = suppressWarnings(
+      as.numeric(.data$LATITUDE83)
+    ),
+    LONGITUDE83 = suppressWarnings(
+      as.numeric(.data$LONGITUDE83)
+    )
+  ) %>%
+  dplyr::filter(
+    .data$NAICSCODE %in% as.character(naics_for_distance),
+    !is.na(.data$LATITUDE83),
+    !is.na(.data$LONGITUDE83),
+    dplyr::between(.data$LATITUDE83, -90, 90),
+    dplyr::between(.data$LONGITUDE83, -180, 180)
+  ) %>%
+  dplyr::distinct(
+    .data$REGISTRYID,
+    .keep_all = TRUE
+  ) %>%
+  sf::st_as_sf(
+    coords = c("LONGITUDE83", "LATITUDE83"),
+    crs = 4269,
+    remove = FALSE
+  ) %>%
+  sf::st_transform(target_crs)
+
+wells_covars$dist_naics_collapsed <- compute_distance(
+  wells_covars,
+  naics_collapsed_sf
+)
+
+### CAP SOURCE DISTANCES ###
+
+distance_vars <- names(wells_covars) %>%
+  stringr::str_subset("^dist_")
+
+wells_covars <- wells_covars %>%
+  dplyr::mutate(
+    dplyr::across(
+      dplyr::all_of(distance_vars),
+      ~ pmin(.x, distance_cap)
+    )
+  )
+
+### WRITE OUTPUT ###
+
+sf::st_write(
+  obj = wells_covars,
+  dsn = output_gpkg,
+  layer = "wells_covars_physical_source",
+  driver = "GPKG",
+  delete_layer = TRUE,
+  quiet = FALSE
+)
